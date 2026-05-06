@@ -312,6 +312,36 @@ pub mod tail_chunks {
         }
     }
 
+    /// Enroll-mode 0x26 for type-1 devices (our ThinkPad P70). Same
+    /// shape as `identify_4e_type1` except for the kind (`0x26` vs
+    /// `0x4e`) and the last 8 bytes of the body
+    /// (`50 c3 60 ea 01 09 10 00` vs `88 13 b8 0b 01 09 10 00`).
+    /// Source: `python-validity/sensor.py:443-447`.
+    pub fn enroll_26_type1() -> Chunk {
+        Chunk {
+            kind: 0x0026,
+            body: vec![
+                0xfb, 0xb2, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x30, 0x00, 0x00, 0x00, 0x87, 0x00,
+                0x02, 0x00, 0x67, 0x00, 0x0a, 0x00, 0x01, 0x80, 0x00, 0x00, 0x0a, 0x02, 0x00, 0x00,
+                0x0b, 0x19, 0x00, 0x00, 0x50, 0xc3, 0x60, 0xea, 0x01, 0x09, 0x10, 0x00,
+            ],
+        }
+    }
+
+    /// Enroll-mode 0x2e for type-1 devices. Differs from `identify_2e`
+    /// by exactly ONE byte: `0x23` instead of `0x02` at index 4
+    /// (the upstream comment in `sensor.py:449` flags this — same
+    /// quirk on 06cb:0097). Source: `python-validity/sensor.py:450`.
+    pub fn enroll_2e_type1() -> Chunk {
+        Chunk {
+            kind: 0x002e,
+            body: vec![
+                0x02, 0x00, 0x18, 0x00, 0x23, 0x00, 0x00, 0x00, 0x70, 0x00, 0x70, 0x00, 0x4d, 0x01,
+                0x00, 0x00, 0xa0, 0x00, 0x8c, 0x00, 0x3c, 0x32, 0x32, 0x1e, 0x3c, 0x0a, 0x02, 0x02,
+            ],
+        }
+    }
+
     /// Identify-mode 0x4e for type-2 devices. Distinct from type-1 in
     /// the middle bytes (`60 01 02 00 40 01 0a` vs `87 00 02 00 67 00 0a`).
     /// Source: `python-validity/sensor.py:line_update_type_2`.
@@ -422,8 +452,8 @@ pub fn line_update_type_1(
             chunks.push(tail_chunks::identify_2e());
         }
         CaptureMode::Enroll => {
-            // Upstream `sensor.py:442-490` adds a different 0x4e and a
-            // 0x2e for enroll. Body bytes deferred until we ship enroll.
+            chunks.push(tail_chunks::enroll_26_type1());
+            chunks.push(tail_chunks::enroll_2e_type1());
         }
         CaptureMode::Calibrate => {}
     }
@@ -1535,6 +1565,87 @@ mod tests {
         assert_eq!(our_chunks[13].body, pv_chunks[13].body, "0x44 interleave");
     }
 
+    /// Sister test to `build_cmd_02_identify_chunks_0_to_12_byte_match_pv_capture`,
+    /// but in ENROLL mode. python-validity's first-iteration ENROLL
+    /// cmd-02 (saved to `scripts/captured/pv_cmd02_enroll.hex`) is a
+    /// 13729-byte packet whose chunk 11 is `0x26` (vs IDENTIFY's
+    /// `0x4e`) and chunk 12 has the single-byte diff at index 4
+    /// (`0x23` vs `0x02`). Everything else (chunks 0-10, 13) is
+    /// host-deterministic.
+    #[test]
+    fn build_cmd_02_enroll_chunks_byte_match_pv_capture() {
+        use crate::chunks::split as split_chunks_inner;
+        use crate::sensor_types::{FM_3367_001, FM_3367_001_PROG};
+
+        const PV_HEX: &str = include_str!("../scripts/captured/pv_cmd02_enroll.hex");
+        let pv: Vec<u8> = (0..PV_HEX.trim().len() / 2)
+            .map(|i| u8::from_str_radix(&PV_HEX.trim()[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        let pv_chunks = split_chunks_inner(&pv[5..]).unwrap();
+        assert_eq!(pv_chunks.len(), 16);
+
+        // Same chunk-type sequence as IDENTIFY, except chunk[11] is
+        // `0x0026` instead of `0x004e`.
+        assert_eq!(pv_chunks[11].kind, 0x0026);
+        assert_eq!(pv_chunks[12].kind, 0x002e);
+
+        let pv_0x34 = &pv_chunks[6];
+        let pv_key_line = &pv_0x34.body[..FM_3367_001.line_width as usize];
+
+        // Brute-force the subst byte same as the IDENTIFY test —
+        // separately, in case ENROLL ever diverges. Should still be 0x8c.
+        let mut found_subst: Option<u8> = None;
+        for trial in 0..=255u8 {
+            let pkt = build_cmd_02(
+                CaptureMode::Enroll,
+                &FM_3367_001_PROG,
+                &FM_3367_001,
+                pv_key_line,
+                3,
+                224,
+                trial,
+                &[],
+                &[],
+            )
+            .unwrap();
+            let our_chunks = split_chunks_inner(&pkt[5..]).unwrap();
+            if our_chunks[6].body == pv_0x34.body {
+                found_subst = Some(trial);
+                break;
+            }
+        }
+        let subst = found_subst.expect("brute-force found subst that matches");
+        assert_eq!(subst, 0x8c);
+
+        let pkt = build_cmd_02(
+            CaptureMode::Enroll,
+            &FM_3367_001_PROG,
+            &FM_3367_001,
+            pv_key_line,
+            3,
+            224,
+            subst,
+            &[],
+            &[],
+        )
+        .unwrap();
+        let our_chunks = split_chunks_inner(&pkt[5..]).unwrap();
+        assert_eq!(our_chunks.len(), pv_chunks.len());
+
+        for i in 0..=12 {
+            assert_eq!(
+                our_chunks[i].kind, pv_chunks[i].kind,
+                "ENROLL chunk[{i}] type",
+            );
+            assert_eq!(
+                our_chunks[i].body, pv_chunks[i].body,
+                "ENROLL chunk[{i}] (type 0x{:04x}) body",
+                pv_chunks[i].kind,
+            );
+        }
+        assert_eq!(our_chunks[13].body, pv_chunks[13].body, "ENROLL 0x44 interleave");
+    }
+
     /// `Line::goes_to_update_transform` reads the 4-bit field at
     /// position `[20..24)` of `flags`. `<= 1` → 0x30, `> 1` → 0x43.
     #[test]
@@ -2030,5 +2141,67 @@ mod tests {
         let id2e = tail_chunks::identify_2e();
         assert_eq!(id2e.kind, 0x002e);
         assert_eq!(id2e.body.len(), 28);
+    }
+
+    /// Type-1 ENROLL tail chunks are tightly related to type-1 IDENTIFY
+    /// tails by exactly the byte differences upstream documents.
+    #[test]
+    fn type_1_enroll_tail_chunks_layout() {
+        let id_4e = tail_chunks::identify_4e_type1();
+        let en_26 = tail_chunks::enroll_26_type1();
+        assert_eq!(en_26.kind, 0x0026);
+        assert_eq!(en_26.body.len(), 40);
+        // First 32 bytes match identify_4e_type1.
+        assert_eq!(&en_26.body[..32], &id_4e.body[..32]);
+        // Last 8 bytes diverge: identify uses `88 13 b8 0b 01 09 10 00`,
+        // enroll uses `50 c3 60 ea 01 09 10 00`.
+        assert_eq!(&en_26.body[32..36], &[0x50, 0xc3, 0x60, 0xea]);
+        assert_eq!(&en_26.body[36..40], &id_4e.body[36..40]);
+
+        let id_2e = tail_chunks::identify_2e();
+        let en_2e = tail_chunks::enroll_2e_type1();
+        assert_eq!(en_2e.kind, 0x002e);
+        assert_eq!(en_2e.body.len(), 28);
+        // Single-byte difference at index 4 (`0x02` → `0x23`); rest
+        // is byte-identical to identify_2e.
+        let mut diff_count = 0;
+        for (i, (a, b)) in en_2e.body.iter().zip(id_2e.body.iter()).enumerate() {
+            if a != b {
+                diff_count += 1;
+                assert_eq!(i, 4, "unexpected diff at byte {i}");
+                assert_eq!(*a, 0x23);
+                assert_eq!(*b, 0x02);
+            }
+        }
+        assert_eq!(diff_count, 1, "exactly one byte diff");
+    }
+
+    /// `line_update_type_1` in ENROLL mode emits the `0x26` + `0x2e`
+    /// tail chunks (NOT the 0x4e), and still produces the same line-
+    /// update bundle as IDENTIFY.
+    #[test]
+    fn line_update_type_1_enroll_mode_tail() {
+        use crate::chunks::Chunk;
+        use crate::sensor_types::FM_3367_001;
+        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 130] }];
+        let key_line = vec![0u8; 112];
+        line_update_type_1(
+            CaptureMode::Enroll,
+            &mut chunks,
+            &FM_3367_001,
+            &key_line,
+            0,
+            &[],
+            &[],
+        );
+        // 0x26 + 0x2e present, no 0x4e (that's IDENTIFY-only).
+        assert_eq!(chunks.iter().filter(|c| c.kind == 0x0026).count(), 1);
+        assert_eq!(chunks.iter().filter(|c| c.kind == 0x002e).count(), 1);
+        assert!(chunks.iter().all(|c| c.kind != 0x004e));
+        // Line-update bundle still appended (calibration must be baked
+        // for ENROLL too — it captures real fingerprint data).
+        assert_eq!(chunks.iter().filter(|c| c.kind == 0x0044).count(), 1);
+        assert_eq!(chunks.iter().filter(|c| c.kind == 0x0030).count(), 1);
+        assert_eq!(chunks.iter().filter(|c| c.kind == 0x0043).count(), 1);
     }
 }

@@ -267,6 +267,36 @@ pub fn identity_to_bytes(sid: &SidIdentity) -> Vec<u8> {
     out
 }
 
+/// Build the cmd `0x4a` "lookup user" request. Wire layout:
+/// `<u8 0x4a, u16 dbid=0, u16 storage_dbid, u16 len(identity_bytes),
+/// identity_bytes>`. Mirrors `python-validity/db.py:Db.lookup_user`.
+/// `dbid=0` means "look up by identity" (the alternative is
+/// `<u8 0x4a, u16 dbid, u16 0, u16 0>` which is `get_user`).
+///
+/// Returns the `User` record on success, or `STATUS_NOT_FOUND`
+/// (0x04b3) when no user with that identity exists.
+pub fn build_lookup_user(storage_dbid: u16, identity: &SidIdentity) -> Vec<u8> {
+    let id_bytes = identity_to_bytes(identity);
+    let mut out = Vec::with_capacity(7 + id_bytes.len());
+    out.push(0x4a);
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&storage_dbid.to_le_bytes());
+    out.extend_from_slice(&(id_bytes.len() as u16).to_le_bytes());
+    out.extend_from_slice(&id_bytes);
+    out
+}
+
+/// Build the cmd `0x46` "get record children" request. Wire layout:
+/// `<u8 0x46, u16 dbid>`. Used to enumerate the records under a
+/// parent (e.g. all users under StgWindsor). Mirrors
+/// `python-validity/db.py:Db.get_record_children`.
+pub fn build_get_record_children(dbid: u16) -> Vec<u8> {
+    let mut out = Vec::with_capacity(3);
+    out.push(0x46);
+    out.extend_from_slice(&dbid.to_le_bytes());
+    out
+}
+
 /// Build the cmd `0x47` "new record" request. Wire layout:
 /// `<u8 0x47, u16 parent, u16 type, u16 storage, u16 len(data), data>`.
 /// Mirrors `python-validity/db.py:Db.new_record`. **Destructive** when
@@ -491,6 +521,26 @@ mod tests {
     fn build_del_record_layout() {
         assert_eq!(build_del_record(0x0042), vec![0x48, 0x42, 0x00]);
         assert_eq!(build_del_record(0xdead), vec![0x48, 0xad, 0xde]);
+    }
+
+    /// `build_lookup_user` produces a cmd 0x4a frame with `dbid=0`,
+    /// the storage dbid, the identity length, and the SID body
+    /// (padded to 0x4c by `identity_to_bytes`).
+    #[test]
+    fn build_lookup_user_layout() {
+        let sid = SidIdentity { revision: 1, auth: 5, subauth: vec![18] };
+        let f = build_lookup_user(/* StgWindsor */ 3, &sid);
+        assert_eq!(f[0], 0x4a);
+        assert_eq!(u16::from_le_bytes([f[1], f[2]]), 0, "dbid=0 means lookup by identity");
+        assert_eq!(u16::from_le_bytes([f[3], f[4]]), 3, "storage dbid");
+        let id_len = u16::from_le_bytes([f[5], f[6]]) as usize;
+        assert_eq!(id_len, 0x4c, "identity is padded to 76 bytes");
+        assert_eq!(f.len(), 7 + 0x4c);
+    }
+
+    #[test]
+    fn build_get_record_children_layout() {
+        assert_eq!(build_get_record_children(3), vec![0x46, 0x03, 0x00]);
     }
 
     /// Canonical SID-string formatting matches the Microsoft format
