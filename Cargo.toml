@@ -1,0 +1,39 @@
+[package]
+name = "think-touch"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.92"
+authors = ["William Desportes <williamdes@wdes.fr>"]
+license = "MPL-2.0"
+description = "Pure-Rust userspace driver for the Synaptics/Validity Metallica MIS (06cb:009a) fingerprint sensor found on the ThinkPad P70."
+repository = "https://github.com/wdes/think-touch"
+readme = "README.md"
+keywords = ["fingerprint", "synaptics", "validity", "thinkpad", "usb"]
+categories = ["hardware-support", "command-line-utilities"]
+
+[lib]
+name = "think_touch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "think-touch"
+path = "src/main.rs"
+
+[dependencies]
+nusb = "0.2"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+jiff = "0.2"
+hmac = "0.12"
+sha2 = "0.10"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+subtle = "2"
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -1,0 +1,15 @@
+# Allow the local console user to talk to supported Synaptics / Validity
+# fingerprint sensors without root. Install with:
+#   sudo cp packaging/udev/70-think-touch.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# The TAG+="uaccess" hands the device to whoever owns the active session;
+# if you prefer a group, replace with: GROUP="plugdev", MODE="0660".
+
+# Metallica MIS — ThinkPad P70 / T480 / X1 Carbon 6
+SUBSYSTEM=="usb", ATTRS{idVendor}=="06cb", ATTRS{idProduct}=="009a", TAG+="uaccess"
+
+# Prometheus family
+SUBSYSTEM=="usb", ATTRS{idVendor}=="138a", ATTRS{idProduct}=="0090", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="138a", ATTRS{idProduct}=="0097", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="138a", ATTRS{idProduct}=="009d", TAG+="uaccess"
