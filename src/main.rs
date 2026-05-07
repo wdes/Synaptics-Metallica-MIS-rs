@@ -227,6 +227,18 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// **Destructive** — delete a record from the device's template
+    /// database (cmd `0x48`). Use with `db-info` / `db-children` /
+    /// `db-user-storage` to find the dbid of the record to remove.
+    /// Deleting a *user* (record type 5) implicitly removes its child
+    /// finger records. Always wraps `db_write_enable` + `call_cleanups`.
+    DeleteRecord {
+        /// Database id of the record to delete.
+        dbid: u16,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Read a flash partition over the TLS session. Defaults to addr 0
     /// and size 0x1000 (4 KiB) — bigger reads must opt in via `--size`.
     ///
@@ -290,6 +302,7 @@ fn main() -> ExitCode {
             try_identify(use_stored_calib, use_saved_calib)
         }
         Cmd::Enroll { subtype, sid_string, yes } => enroll_cmd(subtype, &sid_string, yes),
+        Cmd::DeleteRecord { dbid, yes } => delete_record_cmd(dbid, yes),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -1318,24 +1331,48 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
         }
         println!("create_enrollment OK");
 
-        // 3. Enrol loop. Press the finger 8-12 times typically (the
-        //    device decides when it has enough data — termination is
-        //    signalled by `tid` being non-empty in `append_new_image`).
+        // 3. Enrol loop. Press the finger ~8-12 times (upstream caps at
+        //    similar — termination signalled by `tid` non-empty in the
+        //    `append_new_image` reply). Transient errors per iteration
+        //    (low-quality scan, append-new-image device error) are
+        //    treated as "retry this press"; only fatal protocol errors
+        //    abort. Mirrors python-validity sensor.py:enroll's outer
+        //    try/except behaviour.
+        const MAX_ATTEMPTS: u32 = 25;
+        const MAX_GOOD_PRESSES: u32 = 12;
         let mut prev_template: Vec<u8> = Vec::new();
         let mut key: u32 = 0;
         let final_tid: Vec<u8>;
-        let mut step = 0;
+        let mut attempts: u32 = 0;
+        let mut good_presses: u32 = 0;
         loop {
-            step += 1;
-            if step > 20 {
-                eprintln!("aborting: too many enroll iterations without finalising");
+            attempts += 1;
+            if attempts > MAX_ATTEMPTS {
+                eprintln!(
+                    "\nabort: {MAX_ATTEMPTS} attempts without device emitting final tid; \
+                     check finger placement / sensor cleanliness."
+                );
+                let _ = session.cmd(chan, &GLOW_END_SCAN);
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 return Ok(());
             }
-            println!("\n[enroll step {step}] glow on, sending capture(ENROLL)…");
+            if good_presses > MAX_GOOD_PRESSES {
+                eprintln!(
+                    "\nabort: {good_presses} good captures but device hasn't \
+                     emitted the final tid; this is unusual."
+                );
+                let _ = session.cmd(chan, &GLOW_END_SCAN);
+                let _ = session.cmd(chan, &build_enrollment_mode(0));
+                return Ok(());
+            }
+            println!(
+                "\n[attempt {attempts}/{MAX_ATTEMPTS}, good={good_presses}/{MAX_GOOD_PRESSES}] \
+                 → place finger when LED lights, hold ~2 s, release."
+            );
             let _ = session.cmd(chan, &GLOW_START_SCAN)?;
 
-            // 3a. capture(ENROLL).
+            // 3a. capture(ENROLL). Cmd-02 itself failing is fatal —
+            // the program shape is wrong, retrying won't help.
             let pkt = build_cmd_02(
                 CaptureMode::Enroll,
                 &FM_3367_001_PROG,
@@ -1349,60 +1386,64 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
             )?;
             let resp = session.cmd(chan, &pkt)?;
             let (status, payload) = split_status(&resp)?;
-            println!(
-                "  cmd-02 reply: status={} payload={} B",
-                fmt_status(status),
-                payload.len()
-            );
             if status != 0 {
-                eprintln!("  capture(ENROLL) status: {}", fmt_status(status));
+                eprintln!("  fatal: capture(ENROLL) rejected: {}", fmt_status(status));
                 let _ = session.cmd(chan, &GLOW_END_SCAN);
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 return Ok(());
             }
+            println!("  cmd-02 OK ({} B reply); waiting for events…", payload.len());
+
             // start (expect b[0]==0)
             let evt = chan.wait_int()?;
-            println!("  start event: {}", hex(&evt));
             if evt.first() != Some(&0x00) {
-                eprintln!("  warn: expected b[0]=0x00 start, got {}", hex(&evt));
+                eprintln!("  warn: expected start b[0]=0x00, got {}", hex(&evt));
             }
-            // Wait for the finger event (b[0]==2). Print every event we
-            // see — useful for debugging this hang.
-            println!("  → press your finger NOW (waiting for b[0]=0x02)…");
+            // Wait for the finger event (b[0]==2).
             loop {
                 let evt = chan.wait_int()?;
-                println!("  int: {}", hex(&evt));
                 if evt.first() == Some(&0x02) {
                     break;
                 }
             }
+            print!("  finger detected; ");
             // Wait for capture-complete (b[0]==3 with bit 0x04 set).
-            println!("  waiting for capture-complete (b[0]=0x03, bit 0x04)…");
             loop {
                 let evt = chan.wait_int()?;
-                println!("  int: {}", hex(&evt));
                 if evt.first() == Some(&0x03) && evt.len() >= 3 && (evt[2] & 0x04) != 0 {
                     break;
                 }
             }
-            // get_prg_status2 — must be error == 0 for the matcher to be happy.
+            println!("capture complete.");
+
+            // get_prg_status2: error == 0 = good scan. Anything else
+            // (we observe 0x00080000 ≈ "low quality" on this device) is
+            // a "skip this iteration" signal upstream.
             let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
             let (status, payload) = split_status(&resp)?;
             if status != 0 {
-                eprintln!("  prg_status: {}", fmt_status(status));
+                eprintln!("  prg_status fail: {} — retrying.", fmt_status(status));
+                let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
             let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
-            println!("  scan: x={} y={} w1={} w2={} error=0x{:08x}", cs.x, cs.y, cs.w1, cs.w2, cs.error);
+            if cs.error != 0 {
+                println!(
+                    "  scan rejected (error=0x{:08x} — likely low-quality press); retry.",
+                    cs.error,
+                );
+                let _ = session.cmd(chan, &build_enrollment_mode(0));
+                continue;
+            }
+            println!("  scan OK: x={} y={} w1={} w2={}", cs.x, cs.y, cs.w1, cs.w2);
 
             // 3b. enrollment_update_start (cmd 0x68 + wait_int).
             let resp = session.cmd(chan, &build_enrollment_update_start(key))?;
             let (s, p) = split_status(&resp)?;
             if s != 0 || p.len() < 4 {
-                eprintln!("  enrollment_update_start: {}", fmt_status(s));
-                let _ = session.cmd(chan, &GLOW_END_SCAN);
+                eprintln!("  enrollment_update_start: {} — retrying.", fmt_status(s));
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
-                return Ok(());
+                continue;
             }
             key = u32::from_le_bytes(p[..4].try_into().unwrap());
             let _ = chan.wait_int()?;
@@ -1413,28 +1454,32 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
             let resp = write_enable_then(chan, session, &build_enrollment_update(&prev_template))?;
             let (s, p) = split_status(&resp)?;
             if s != 0 {
-                eprintln!("  append_new_image: {}", fmt_status(s));
-                let _ = session.cmd(chan, &GLOW_END_SCAN);
+                eprintln!("  append_new_image: {} — retrying.", fmt_status(s));
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
-                return Ok(());
+                continue;
             }
-            // The reply payload starts with a u16 declared length, then a
-            // stream of TLV chunks (tag/len/magic/body) each ENROLL_MAGIC_LEN+body_len.
             if p.len() < 2 {
-                eprintln!("  append_new_image: short reply");
+                eprintln!("  append_new_image: short reply ({} B) — retrying.", p.len());
+                let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
             let body_len = u16::from_le_bytes([p[0], p[1]]) as usize;
             if 2 + body_len > p.len() {
-                eprintln!("  append_new_image: declared body_len {body_len} exceeds reply");
+                eprintln!(
+                    "  append_new_image: declared body_len {body_len} exceeds reply; retrying.",
+                );
+                let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
             let body = &p[2..2 + body_len];
 
             // Walk chunks per upstream: tag 0 → next-iteration prev (full
-            // chunk including 0x38 magic header); tag 3 → final tid.
+            // chunk including 0x38 magic header); tag 1 → progress header
+            // (we surface its first 2 bytes as the "progress bitmask");
+            // tag 3 → final tid.
             let mut walker = body;
             let mut new_prev: Option<Vec<u8>> = None;
+            let mut header_progress: Option<u16> = None;
             let mut tid: Option<Vec<u8>> = None;
             while !walker.is_empty() {
                 if walker.len() < 4 { break; }
@@ -1442,20 +1487,34 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
                 let l = u16::from_le_bytes([walker[2], walker[3]]) as usize;
                 let chunk_size = ENROLL_MAGIC_LEN + l;
                 if walker.len() < chunk_size { break; }
-                if tag == 0 {
-                    new_prev = Some(walker[..chunk_size].to_vec());
-                } else if tag == 3 {
-                    tid = Some(walker[ENROLL_MAGIC_LEN..ENROLL_MAGIC_LEN + l].to_vec());
+                let val = &walker[ENROLL_MAGIC_LEN..ENROLL_MAGIC_LEN + l];
+                match tag {
+                    0 => new_prev = Some(walker[..chunk_size].to_vec()),
+                    1 if l >= 2 => header_progress = Some(u16::from_le_bytes([val[0], val[1]])),
+                    3 => tid = Some(val.to_vec()),
+                    _ => {}
                 }
                 walker = &walker[chunk_size..];
             }
+
+            // Successful press recorded.
+            good_presses += 1;
             if let Some(np) = new_prev {
                 prev_template = np;
-                println!("  prev_template now {} B", prev_template.len());
+            }
+            if let Some(progress) = header_progress {
+                let bits = progress.count_ones();
+                println!(
+                    "  progress: 0x{progress:04x} ({} of ~5 bits set) — press again.",
+                    bits,
+                );
             }
             if let Some(t) = tid {
                 final_tid = t;
-                println!("  final tid received ({} B) → enroll complete.", final_tid.len());
+                println!(
+                    "\n  ✓ final tid received ({} B); enrollment data gathered.",
+                    final_tid.len(),
+                );
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 break;
             }
@@ -1524,51 +1583,194 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
     })
 }
 
-fn match_finger() -> Result<()> {
-    // Wire format (per upstream `sensor.py:match_finger`):
-    //   <u8 0x5e, u8 2, u8 0xff, u16 stg_id=0, u16 usr_id=0, u16 1, u16 0, u16 0>
-    // = 12 bytes total. After cmd, wait for interrupt b[0]=3, then
-    //   send `60 00 00 00 00` to read results.
+fn delete_record_cmd(dbid: u16, yes: bool) -> Result<()> {
+    use think_touch::db::build_del_record;
+    if !yes {
+        eprintln!(
+            "About to delete record dbid={dbid} (cmd 0x48). This is destructive:\n\
+             - Deleting a User record (type 5) cascades to all its child finger records.\n\
+             - Deleting a Finger record (type 0xb) leaves its parent User in place.\n\
+             - There is no undo.\n\n\
+             Re-run with --yes to proceed."
+        );
+        return Ok(());
+    }
     with_session(|chan, session| {
         println!("HANDSHAKE OK ✓");
-        let mut req = Vec::with_capacity(12);
-        req.push(0x5e);
-        req.push(0x02);
-        req.push(0xff);
-        req.extend_from_slice(&0u16.to_le_bytes()); // stg_id
-        req.extend_from_slice(&0u16.to_le_bytes()); // usr_id
-        req.extend_from_slice(&1u16.to_le_bytes());
-        req.extend_from_slice(&0u16.to_le_bytes());
-        req.extend_from_slice(&0u16.to_le_bytes());
-        let resp = session.cmd(chan, &req)?;
-        let (status, payload) = split_status(&resp)?;
-        println!("> match_finger cmd: status={} payload_len={}", fmt_status(status), payload.len());
-        if status != 0 {
-            eprintln!("device rejected match_finger (no enrolled finger / no current capture)");
-            return Ok(());
-        }
-        println!("> waiting for matcher result interrupt (b[0]=3)…");
-        let evt = chan.wait_int()?;
-        println!("  got: {}", hex(&evt));
-        if evt.first() != Some(&0x03) {
-            eprintln!("expected b[0]=3 from matcher, got {}", hex(&evt));
-            return Ok(());
+        // Read back what we're about to delete, for the operator's record.
+        let resp = session.cmd(chan, &[0x49, (dbid & 0xff) as u8, (dbid >> 8) as u8])?;
+        let (s, p) = split_status(&resp)?;
+        if s == 0 && p.len() >= 12 {
+            let typ = u16::from_le_bytes([p[2], p[3]]);
+            let storage = u16::from_le_bytes([p[4], p[5]]);
+            println!("  pre-delete: dbid={dbid} type={typ} storage={storage}");
+        } else if s != 0 {
+            eprintln!(
+                "  warn: pre-delete read returned {} (record may not exist).",
+                fmt_status(s)
+            );
         }
 
-        // Fetch the match result via cmd 0x60.
-        let resp = session.cmd(chan, &[0x60, 0x00, 0x00, 0x00, 0x00])?;
-        let (status, payload) = split_status(&resp)?;
-        println!("\n> match-result fetch: status={} payload_len={}", fmt_status(status), payload.len());
-        if status != 0 || payload.len() < 2 {
-            return Ok(());
+        let cmd = build_del_record(dbid);
+        let resp = write_enable_then(chan, session, &cmd)?;
+        let (s, _) = split_status(&resp)?;
+        if s == 0 {
+            println!("  ✓ deleted record dbid={dbid}");
+        } else {
+            eprintln!("  delete failed: {}", fmt_status(s));
         }
-        let len = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
-        let body = &payload[2..];
-        println!("  declared body len: {len}, actual: {}", body.len());
-        println!("  raw: {}", hex(body));
-        // Per-record body decoding deferred — see upstream
-        // `sensor.py:match_finger` lines 880-895.
         Ok(())
+    })
+}
+
+/// One-shot identify-and-match. Drives the full pipeline:
+/// `glow_start` → `capture(IDENTIFY)` → `get_prg_status2` → `cmd 0x5e` →
+/// matcher verdict → `cmd 0x60`. On match, prints a one-line
+/// machine-readable result on stdout (`MATCH dbid=N subtype=M name`)
+/// and exits 0. On no-match / low-quality / error, prints to stderr
+/// and returns a non-OK Result so the binary's exit code is non-zero.
+///
+/// Designed for `pam_exec` and other "did this finger authenticate?"
+/// callers — terse stdout, exit code carries the verdict.
+fn match_finger() -> Result<()> {
+    use std::path::Path;
+    use think_touch::blobs::{GLOW_END_SCAN, GLOW_START_SCAN};
+    use think_touch::cache::CALIB_DATA_PATH;
+    use think_touch::capture::{CaptureMode, build_cmd_02, get_key_line};
+    use think_touch::db::subtype_name;
+    use think_touch::sensor_types::{FM_3367_001, FM_3367_001_PROG};
+
+    const KEY_CAL_LINE: u32 = 0x38;
+    const LINES_PER_FRAME: u16 = 224;
+    const CALIBRATION_FRAMES: u16 = 3;
+
+    // We require a saved calib file (run `save-calib` first). Live
+    // calibration in this path would add ~1 s latency on every match
+    // and produces less consistent results across runs.
+    let calib_path = Path::new(CALIB_DATA_PATH);
+    if !calib_path.exists() {
+        eprintln!(
+            "no saved calibration at {} — run `save-calib` first.",
+            calib_path.display(),
+        );
+        return Err(Error::PairingMalformed { reason: "calib_data missing" });
+    }
+    let calib_data = std::fs::read(calib_path)?;
+
+    with_session(|chan, session| {
+        let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
+        let subst_value = factory_cal_values.get(KEY_CAL_LINE as usize).copied()
+            .ok_or(Error::PairingMalformed { reason: "factory_calibration_values too short" })?;
+        let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
+
+        let _ = session.cmd(chan, &GLOW_START_SCAN)?;
+        let pkt = build_cmd_02(
+            CaptureMode::Identify,
+            &FM_3367_001_PROG,
+            &FM_3367_001,
+            &key_line,
+            CALIBRATION_FRAMES,
+            LINES_PER_FRAME,
+            subst_value,
+            &factory_cal_values,
+            &calib_data,
+        )?;
+        let resp = session.cmd(chan, &pkt)?;
+        let (status, _) = split_status(&resp)?;
+        if status != 0 {
+            let _ = session.cmd(chan, &GLOW_END_SCAN);
+            eprintln!("capture rejected: {}", fmt_status(status));
+            return Err(Error::PairingMalformed { reason: "capture rejected" });
+        }
+
+        // Drain start, finger, capture-complete events.
+        let _ = chan.wait_int()?;
+        eprintln!("press your enrolled finger now");
+        loop {
+            let evt = chan.wait_int()?;
+            if evt.first() == Some(&0x02) { break; }
+        }
+        loop {
+            let evt = chan.wait_int()?;
+            if evt.first() == Some(&0x03) && evt.len() >= 3 && (evt[2] & 0x04) != 0 {
+                break;
+            }
+        }
+
+        // Capture metadata: error must be 0 to run the matcher.
+        let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
+        let (status, payload) = split_status(&resp)?;
+        let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
+        let _ = session.cmd(chan, &GLOW_END_SCAN);
+        if status != 0 || cs.error != 0 {
+            eprintln!("scan low quality (status={}, error=0x{:08x}); retry.", fmt_status(status), cs.error);
+            return Err(Error::PairingMalformed { reason: "low quality scan" });
+        }
+
+        // Run matcher.
+        let mut match_cmd = Vec::with_capacity(13);
+        match_cmd.push(0x5e);
+        match_cmd.push(0x02);
+        match_cmd.push(0xff);
+        match_cmd.extend_from_slice(&0u16.to_le_bytes());
+        match_cmd.extend_from_slice(&0u16.to_le_bytes());
+        match_cmd.extend_from_slice(&1u16.to_le_bytes());
+        match_cmd.extend_from_slice(&0u16.to_le_bytes());
+        match_cmd.extend_from_slice(&0u16.to_le_bytes());
+        let resp = session.cmd(chan, &match_cmd)?;
+        let (s, _) = split_status(&resp)?;
+        if s != 0 {
+            eprintln!("match cmd rejected: {}", fmt_status(s));
+            let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+            return Err(Error::PairingMalformed { reason: "match cmd rejected" });
+        }
+
+        // Wait for verdict.
+        let verdict = chan.wait_int()?;
+        if verdict.first() != Some(&0x03) {
+            // 0x05 = no DB match, 0x04 = matcher rejected scan; both
+            // surface as "no match" for the caller.
+            let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+            eprintln!("no match (verdict {})", hex(&verdict));
+            return Err(Error::PairingMalformed { reason: "no match" });
+        }
+
+        // Fetch result.
+        let resp = session.cmd(chan, &[0x60, 0x00, 0x00, 0x00, 0x00])?;
+        let (s, payload) = split_status(&resp)?;
+        let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+        if s != 0 || payload.len() < 2 {
+            eprintln!("fetch result failed: {}", fmt_status(s));
+            return Err(Error::PairingMalformed { reason: "fetch result failed" });
+        }
+        let body_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+        let body = &payload[2..2 + body_len.min(payload.len() - 2)];
+        let mut p = body;
+        let mut user_id: Option<u32> = None;
+        let mut subtype: Option<u16> = None;
+        while p.len() >= 4 {
+            let tag = u16::from_le_bytes([p[0], p[1]]);
+            let l = u16::from_le_bytes([p[2], p[3]]) as usize;
+            if 4 + l > p.len() { break; }
+            let val = &p[4..4 + l];
+            match tag {
+                1 if l == 4 => user_id = Some(u32::from_le_bytes(val.try_into().unwrap())),
+                3 if l == 2 => subtype = Some(u16::from_le_bytes(val.try_into().unwrap())),
+                _ => {}
+            }
+            p = &p[4 + l..];
+        }
+        match (user_id, subtype) {
+            (Some(uid), Some(s)) => {
+                let label = subtype_name(s).unwrap_or("(unknown)");
+                println!("MATCH dbid={uid} subtype={s} {label}");
+                Ok(())
+            }
+            _ => {
+                eprintln!("matcher returned malformed payload: {}", hex(body));
+                Err(Error::PairingMalformed { reason: "malformed match payload" })
+            }
+        }
     })
 }
 
