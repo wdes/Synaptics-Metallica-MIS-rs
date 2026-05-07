@@ -1294,6 +1294,12 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
         let subst_value = factory_cal_values.get(KEY_CAL_LINE as usize).copied()
             .ok_or(Error::PairingMalformed { reason: "factory_calibration_values too short" })?;
         println!("subst_value: 0x{subst_value:02x}");
+        println!();
+        println!("┌────────────────────────────────────────────────────────────┐");
+        println!("│  ENROLL: place your finger ~8-12 times when prompted.      │");
+        println!("│  The LED briefly lights at the start of each press cycle.  │");
+        println!("│  If you Ctrl-C, the LED may stay on — run `reset` after.   │");
+        println!("└────────────────────────────────────────────────────────────┘");
 
         let mut calib_data: Vec<u8> = Vec::new();
         for iter in 1..=CALIBRATION_ITERATIONS {

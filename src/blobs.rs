@@ -373,6 +373,31 @@ mod tests {
         assert_ne!(&GLOW_START_SCAN[1..6], &GLOW_END_SCAN[1..6]);
     }
 
+    /// Byte-exact match of our `GLOW_START_SCAN` against python-
+    /// validity's source-of-truth (`sensor.py:32-36`). Locks the
+    /// content; an earlier version of this module silently grew an
+    /// extra 131 zero bytes which made the LED never light.
+    #[test]
+    fn glow_start_scan_bytes_match_python_validity() {
+        // Hex string transcribed verbatim from
+        // `python-validity/validitysensor/sensor.py:34`.
+        const PV_HEX: &str = "3920bf0200ffff0000019900200000000099990000000000000000000000000020000000000000000000000000ffff000000990020000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let pv: Vec<u8> = (0..PV_HEX.len() / 2)
+            .map(|i| u8::from_str_radix(&PV_HEX[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        assert_eq!(GLOW_START_SCAN.as_slice(), pv.as_slice());
+    }
+
+    /// Same byte-exact lock for `GLOW_END_SCAN`.
+    #[test]
+    fn glow_end_scan_bytes_match_python_validity() {
+        const PV_HEX: &str = "39f4010000f401000001ff002000000000ffff0000000000000000000000000020000000000000000000000000f401000000ff0020000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let pv: Vec<u8> = (0..PV_HEX.len() / 2)
+            .map(|i| u8::from_str_radix(&PV_HEX[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        assert_eq!(GLOW_END_SCAN.as_slice(), pv.as_slice());
+    }
+
     /// `DB_WRITE_ENABLE_9A` is exactly 3621 bytes and starts with the
     /// `06 02 00 00` magic header that all `blobs_9a.py` capsules
     /// share. Tail byte is `0x60` (last byte of the capsule's signed
