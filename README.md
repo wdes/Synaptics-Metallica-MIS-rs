@@ -339,9 +339,11 @@ think-touch forget              # delete cached pairing record (forces re-decryp
 think-touch save-calib                                     # 3-pass calibration → /var/lib/think-touch/calib_data
 think-touch try-calibrate [--save-pgm out.pgm]             # one CALIBRATE pass; optionally PGM-render
 think-touch try-identify [--use-saved-calib | --use-stored-calib]
-                                                           # full identify + match flow
-think-touch enroll --subtype 1 [--sid-string S-...] --yes  # write a fingerprint (destructive)
-think-touch match-finger                                   # cmd 0x5e — only after a successful IDENTIFY
+                                                           # full identify + match flow with verbose trace
+think-touch match-finger                                   # one-shot identify+match; stdout: "MATCH dbid=N subtype=M …"
+                                                           # exit 0 = match, non-zero = no-match / low-quality / error
+think-touch enroll --subtype 1 [--sid-string S-...] --yes  # write a fingerprint (destructive, auto-retries on quality errors)
+think-touch delete-record <dbid> --yes                     # remove a user or finger record (cmd 0x48, cascades for users)
 think-touch blink                                          # exercise the LED control path
 ```
 
