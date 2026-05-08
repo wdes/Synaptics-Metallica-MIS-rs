@@ -9,4 +9,4 @@
 # who you're SU'ing TO. PAM still validates that the matched user is
 # the *target* user (or root) via downstream modules.
 
-auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
+auth   sufficient   pam_exec.so   quiet   /usr/local/lib/synaptics-mis-pam.sh

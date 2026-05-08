@@ -13,4 +13,4 @@
 # treats the auth as successful. If it returns non-zero, PAM falls
 # through to the next module (typically password prompt).
 
-auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
+auth   sufficient   pam_exec.so   quiet   /usr/local/lib/synaptics-mis-pam.sh

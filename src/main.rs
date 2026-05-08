@@ -391,6 +391,26 @@ fn version() -> Result<()> {
 
     let mut chan = Channel::open(&sensor)?;
     let resp = chan.cmd(&[CMD_GET_VERSION])?;
+
+    // Detect TLS alert frames (`15 03 03 …`) returned in the cleartext
+    // path. This happens when a previous run left the device in TLS-
+    // session mode: the device wraps every reply in a TLS record, but
+    // we sent the cleartext cmd 0x01 raw, so it answers with an alert
+    // about the malformed protocol. Don't try to parse it as RomInfo
+    // — the bytes look like garbage RomInfo otherwise.
+    if resp.first() == Some(&0x15) && resp.get(1) == Some(&0x03) && resp.get(2) == Some(&0x03) {
+        eprintln!(
+            "device replied with a TLS alert (`15 03 03 …`) instead of a cleartext\n\
+             RomInfo. This means it's stuck in TLS-session mode from a previous run.\n\
+             \n\
+             Fix:\n\
+                 synaptics-metallica-mis reset\n\
+             \n\
+             then re-run `version`."
+        );
+        return Err(Error::ShortResponse);
+    }
+
     let (status, payload) = split_status(&resp)?;
 
     println!("> 01");
@@ -600,7 +620,29 @@ fn load_or_decrypt_pairing(chan: &mut Channel) -> Result<cache::PairingCache> {
         ecdh_q: q,
     };
     if let Err(e) = cached.save(cache_path) {
-        log::warn!("could not write pairing cache to {}: {e}", cache_path.display());
+        // EACCES typically means the file exists but is owned by another
+        // user (e.g. migrated from /var/lib/think-touch/ via `sudo cp`,
+        // which leaves the file root-owned with mode 0600). Surface the
+        // exact fix instead of dropping a generic Permission denied.
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            eprintln!(
+                "warn: could not write pairing cache to {} (Permission denied).\n\
+                 \n\
+                 The cache file likely exists but is owned by another user (often\n\
+                 root, after a `sudo cp` migration). The session works fine — the\n\
+                 next run will redo the flash decrypt unless the cache is fixable.\n\
+                 \n\
+                 To make the cache user-writable (assumes you're in the `plugdev`\n\
+                 group from packaging/install.sh):\n\
+                     sudo chgrp plugdev {0}\n\
+                     sudo chmod 0660 {0}\n\
+                 Or just delete it and let the binary recreate it:\n\
+                     sudo rm -f {0}\n",
+                cache_path.display(),
+            );
+        } else {
+            log::warn!("could not write pairing cache to {}: {e}", cache_path.display());
+        }
     } else {
         log::info!("wrote pairing cache to {}", cache_path.display());
     }

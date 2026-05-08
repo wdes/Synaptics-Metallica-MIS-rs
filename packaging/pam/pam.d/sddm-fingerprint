@@ -3,9 +3,9 @@
 #
 # Add this line near the TOP of /etc/pam.d/sddm:
 #
-#   auth   sufficient   pam_exec.so expose_authtok   /usr/local/lib/synaptics-mis-pam.sh
+#   auth   sufficient   pam_exec.so   quiet expose_authtok   /usr/local/lib/synaptics-mis-pam.sh
 #
 # A successful match logs the user in without a password. If the
 # match fails or times out, the user gets the normal password prompt.
 
-auth   sufficient   pam_exec.so expose_authtok   /usr/local/lib/synaptics-mis-pam.sh
+auth   sufficient   pam_exec.so   quiet expose_authtok   /usr/local/lib/synaptics-mis-pam.sh

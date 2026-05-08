@@ -37,7 +37,7 @@ sudo install -m 0755 synaptics-mis-pam.sh /usr/local/lib/synaptics-mis-pam.sh
 #    auth lines, with `sufficient` so a successful match skips the
 #    rest):
 #
-#    auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
+#    auth   sufficient   pam_exec.so   quiet   /usr/local/lib/synaptics-mis-pam.sh
 #
 # A copy of that one-line patch is in pam.d/sudo-fingerprint:
 sudo install -m 0644 pam.d/sudo-fingerprint /etc/pam.d/sudo-fingerprint

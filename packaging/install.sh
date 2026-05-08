@@ -29,7 +29,11 @@ UDEV_FILE="70-synaptics-metallica-mis.rules"
 STATE_DIR="${STATE_DIR:-/var/lib/synaptics-metallica-mis}"
 GROUP="${SMM_GROUP:-plugdev}"
 PAM_LIB="${PAM_LIB:-/usr/local/lib/synaptics-mis-pam.sh}"
-PAM_LINE='auth   sufficient   pam_exec.so   '"$PAM_LIB"
+# `quiet` suppresses pam_exec's "exit code N" message on failure
+# (sudo otherwise prints "<wrapper> échec : code de sortie 1" before
+# falling through to the password prompt). The wrapper still logs to
+# syslog at NOTICE for audit.
+PAM_LINE='auth   sufficient   pam_exec.so   quiet   '"$PAM_LIB"
 PAM_MARKER='# synaptics-metallica-mis'
 
 ENABLE_SUDO=0
