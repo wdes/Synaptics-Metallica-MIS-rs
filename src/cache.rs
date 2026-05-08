@@ -20,9 +20,9 @@ use std::path::Path;
 
 use crate::pairing::{EcdhQ, PrivKey};
 
-pub const DEFAULT_PATH: &str = "/var/lib/think-touch/session";
-pub const CALIB_DATA_PATH: &str = "/var/lib/think-touch/calib_data";
-const MAGIC: &str = "think-touch session v1";
+pub const DEFAULT_PATH: &str = "/var/lib/synaptics-metallica-mis/session";
+pub const CALIB_DATA_PATH: &str = "/var/lib/synaptics-metallica-mis/calib_data";
+const MAGIC: &str = "synaptics-metallica-mis session v1";
 
 /// Save raw calibration bytes — the output of `process_calibration_results`
 /// chained over the calibration iteration loop. Mirrors upstream's
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn roundtrip_via_temp_file() {
         let dir = std::env::temp_dir();
-        let path: PathBuf = dir.join(format!("think-touch-test-{}", std::process::id()));
+        let path: PathBuf = dir.join(format!("synaptics-metallica-mis-test-{}", std::process::id()));
         let _ = fs::remove_file(&path);
 
         let original = fixture();
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn missing_magic_rejected() {
         let dir = std::env::temp_dir();
-        let path: PathBuf = dir.join(format!("think-touch-test-nomagic-{}", std::process::id()));
+        let path: PathBuf = dir.join(format!("synaptics-metallica-mis-test-nomagic-{}", std::process::id()));
         fs::write(&path, "device_name=foo\ndevice_serial=bar\n").unwrap();
         assert!(PairingCache::load(&path).is_err());
         let _ = fs::remove_file(&path);
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn calib_data_round_trip() {
         let path: PathBuf =
-            std::env::temp_dir().join(format!("think-touch-calib-{}", std::process::id()));
+            std::env::temp_dir().join(format!("synaptics-metallica-mis-calib-{}", std::process::id()));
         let _ = fs::remove_file(&path);
         let data: Vec<u8> = (0..1024).map(|i| (i & 0xff) as u8).collect();
         save_calib_data(&path, &data).unwrap();
@@ -269,17 +269,17 @@ mod tests {
 
     #[test]
     fn load_calib_data_missing_returns_not_found() {
-        let path = PathBuf::from("/nonexistent/path/think-touch-calib");
+        let path = PathBuf::from("/nonexistent/path/synaptics-metallica-mis-calib");
         let err = load_calib_data(&path).unwrap_err();
         assert!(matches!(err.kind(), io::ErrorKind::NotFound));
     }
 
     /// Loader silently ignores unknown keys (forward-compat for any
-    /// future fields written by a newer think-touch version).
+    /// future fields written by a newer synaptics-metallica-mis version).
     #[test]
     fn unknown_keys_are_ignored() {
         let path: PathBuf = std::env::temp_dir()
-            .join(format!("think-touch-test-unknown-{}", std::process::id()));
+            .join(format!("synaptics-metallica-mis-test-unknown-{}", std::process::id()));
         let zero64 = "0".repeat(64);
         let cert = "abcd";
         let body = format!(
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn missing_required_fields_error() {
         let path: PathBuf = std::env::temp_dir()
-            .join(format!("think-touch-test-missing-{}", std::process::id()));
+            .join(format!("synaptics-metallica-mis-test-missing-{}", std::process::id()));
         // Only magic + name — every other required field absent.
         fs::write(&path, format!("{MAGIC}\ndevice_name=Foo\n")).unwrap();
         let err = PairingCache::load(&path).unwrap_err();
@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn wrong_length_hex_errors() {
         let path: PathBuf =
-            std::env::temp_dir().join(format!("think-touch-test-wrongsz-{}", std::process::id()));
+            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-wrongsz-{}", std::process::id()));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn odd_length_hex_errors() {
         let path: PathBuf =
-            std::env::temp_dir().join(format!("think-touch-test-odd-{}", std::process::id()));
+            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-odd-{}", std::process::id()));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn empty_device_name_value() {
         let path: PathBuf =
-            std::env::temp_dir().join(format!("think-touch-test-empty-{}", std::process::id()));
+            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-empty-{}", std::process::id()));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\

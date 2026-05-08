@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! think-touch — pure-Rust userspace driver for Synaptics/Validity
+//! synaptics-metallica-mis — pure-Rust userspace driver for Synaptics/Validity
 //! Metallica-MIS fingerprint sensors (USB id `06cb:009a`).
 //!
 //! The crate is a work in progress. The current public surface is limited

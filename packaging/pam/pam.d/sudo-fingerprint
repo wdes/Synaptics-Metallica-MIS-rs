@@ -1,0 +1,16 @@
+# /etc/pam.d/sudo-fingerprint — drop-in for sudo to try fingerprint first.
+#
+# How to use: include this BEFORE the existing auth lines in
+# /etc/pam.d/sudo. Recommended layout:
+#
+#   #%PAM-1.0
+#   @include sudo-fingerprint
+#   @include common-auth          ← falls through here if FP fails
+#   @include common-account
+#   @include common-session-noninteractive
+#
+# `sufficient` means: if pam_exec returns 0 (FP match), PAM stops and
+# treats the auth as successful. If it returns non-zero, PAM falls
+# through to the next module (typically password prompt).
+
+auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh

@@ -1,26 +1,26 @@
 #!/bin/sh
-# install.sh — system-wide install of think-touch with no-sudo runtime.
+# install.sh — system-wide install of synaptics-metallica-mis with no-sudo runtime.
 #
 # What this does:
-#   1. Copies target/release/think-touch → /usr/local/bin/think-touch
+#   1. Copies target/release/synaptics-metallica-mis → /usr/local/bin/synaptics-metallica-mis
 #   2. Grants it CAP_DAC_READ_SEARCH so it can read
 #      /sys/class/dmi/id/product_serial without root.
 #   3. Installs the udev rule so unprivileged users can claim the USB
 #      device once they're at the local console.
-#   4. Creates /var/lib/think-touch/ owned by the `plugdev` group
-#      (configurable via THINK_TOUCH_GROUP env var) so the cache file
+#   4. Creates /var/lib/synaptics-metallica-mis/ owned by the `plugdev` group
+#      (configurable via SMM_GROUP env var) so the cache file
 #      survives across reboots and is reachable by group members.
 #
 # Run with sudo. Idempotent — safe to re-run.
 set -eu
 
 PREFIX="${PREFIX:-/usr/local}"
-BIN_SRC="${BIN_SRC:-target/release/think-touch}"
-BIN_DST="${PREFIX}/bin/think-touch"
+BIN_SRC="${BIN_SRC:-target/release/synaptics-metallica-mis}"
+BIN_DST="${PREFIX}/bin/synaptics-metallica-mis"
 UDEV_DIR="${UDEV_DIR:-/etc/udev/rules.d}"
-UDEV_FILE="70-think-touch.rules"
-STATE_DIR="${STATE_DIR:-/var/lib/think-touch}"
-GROUP="${THINK_TOUCH_GROUP:-plugdev}"
+UDEV_FILE="70-synaptics-metallica-mis.rules"
+STATE_DIR="${STATE_DIR:-/var/lib/synaptics-metallica-mis}"
+GROUP="${SMM_GROUP:-plugdev}"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "$0: must run as root (try: sudo $0)" >&2
@@ -57,7 +57,7 @@ if getent group "$GROUP" >/dev/null 2>&1; then
 else
     echo "  note: group '$GROUP' doesn't exist on this system."
     echo "        Leaving $STATE_DIR root-owned. To switch to a group,"
-    echo "        re-run with THINK_TOUCH_GROUP=<groupname>."
+    echo "        re-run with SMM_GROUP=<groupname>."
     chmod 0700 "$STATE_DIR"
 fi
 
@@ -71,9 +71,9 @@ cat <<EOF
 
 Test as your normal user (no sudo):
 
-  think-touch list
-  think-touch version
-  think-touch diagnose
+  synaptics-metallica-mis list
+  synaptics-metallica-mis version
+  synaptics-metallica-mis diagnose
 
 If those still ask for root, re-plug the sensor (or reboot) so udev
 re-applies the new rule, and verify your account is in the

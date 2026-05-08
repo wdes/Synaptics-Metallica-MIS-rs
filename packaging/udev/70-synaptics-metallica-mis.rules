@@ -1,6 +1,6 @@
 # Allow the local console user to talk to supported Synaptics / Validity
 # fingerprint sensors without root. Install with:
-#   sudo cp packaging/udev/70-think-touch.rules /etc/udev/rules.d/
+#   sudo cp packaging/udev/70-synaptics-metallica-mis.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload && sudo udevadm trigger
 #
 # The TAG+="uaccess" hands the device to whoever owns the active session;

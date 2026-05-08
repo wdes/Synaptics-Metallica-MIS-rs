@@ -1,6 +1,6 @@
 # Third-party attribution
 
-`think-touch` itself is licensed under the Mozilla Public License 2.0
+`synaptics-metallica-mis` itself is licensed under the Mozilla Public License 2.0
 (see [`LICENSE`](./LICENSE)). The list below documents external work
 that influenced this codebase.
 
@@ -52,7 +52,7 @@ under MIT compatibility.
 Source: https://github.com/nmikhailov/Validity90 — used as a
 specification document, not as code. The repository ships protocol
 notes (`docs/`), a Wireshark dissector and a prototype implementation;
-none of that source has been copied into `think-touch`.
+none of that source has been copied into `synaptics-metallica-mis`.
 
 ### Lenovo firmware extension (`xpfwext`)
 
@@ -61,7 +61,7 @@ Lenovo inside their Windows fingerprint driver installer:
 
   https://download.lenovo.com/pccbbs/mobiles/nz3gf07w.exe
 
-`think-touch` does not redistribute the blob. The URL above is the
+`synaptics-metallica-mis` does not redistribute the blob. The URL above is the
 canonical source documented by `python-validity`'s
 `validitysensor/firmware_tables.py`.
 

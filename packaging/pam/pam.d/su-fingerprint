@@ -1,0 +1,12 @@
+# /etc/pam.d/su-fingerprint — drop-in for `su` to try fingerprint first.
+#
+# Add at the top of /etc/pam.d/su:
+#
+#   @include su-fingerprint
+#
+# Note: `su` is most useful with fingerprint when targeting a different
+# user than the current one — the matcher resolves who you ARE, not
+# who you're SU'ing TO. PAM still validates that the matched user is
+# the *target* user (or root) via downstream modules.
+
+auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh

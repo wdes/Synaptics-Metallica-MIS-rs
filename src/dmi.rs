@@ -39,7 +39,7 @@ impl HostId {
                    1. Re-run with sudo (one-shot).\n\
                    2. Grant the binary CAP_DAC_READ_SEARCH so it can read\n\
                       DMI without root:\n\
-                          sudo setcap cap_dac_read_search+ep <path-to-think-touch>\n\
+                          sudo setcap cap_dac_read_search+ep <path-to-synaptics-metallica-mis>\n\
                       Or run the installer:\n\
                           sudo ./packaging/install.sh\n\
                  \n\
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn read_dmi_returns_trimmed_contents() {
-        let path = std::env::temp_dir().join(format!("think-touch-dmi-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("synaptics-metallica-mis-dmi-{}", std::process::id()));
         let mut f = fs::File::create(&path).unwrap();
         // Real /sys/class/dmi/id files always carry a trailing newline.
         writeln!(f, "20QRCTO1WW").unwrap();
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn read_dmi_returns_none_on_missing_file() {
-        assert!(read_dmi("/this/path/does/not/exist/think-touch-dmi-test").is_none());
+        assert!(read_dmi("/this/path/does/not/exist/synaptics-metallica-mis-dmi-test").is_none());
     }
 
     /// Empty file (DMI sometimes has empty product_serial on VMs)
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn read_dmi_empty_file_is_empty_string() {
         let path =
-            std::env::temp_dir().join(format!("think-touch-dmi-empty-{}", std::process::id()));
+            std::env::temp_dir().join(format!("synaptics-metallica-mis-dmi-empty-{}", std::process::id()));
         fs::write(&path, "").unwrap();
         let v = read_dmi(path.to_str().unwrap()).unwrap();
         assert_eq!(v, "");

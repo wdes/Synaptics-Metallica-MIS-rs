@@ -64,11 +64,11 @@ enum Cmd {
     /// Query the fwext partition (`0x43 02`) over TLS and decode the
     /// `PartitionInfo` reply (firmware-extension version + module table).
     FwextInfo,
-    /// Delete the cached pairing record at `/var/lib/think-touch/session`.
+    /// Delete the cached pairing record at `/var/lib/synaptics-metallica-mis/session`.
     /// Use after re-pairing or to force a flash re-read on the next run.
     Forget,
     /// Run the 3-pass calibration loop, then persist the resulting
-    /// calib_data buffer to `/var/lib/think-touch/calib_data` (mode 0600).
+    /// calib_data buffer to `/var/lib/synaptics-metallica-mis/calib_data` (mode 0600).
     /// Subsequent `try-identify` runs can `--use-saved-calib` to skip
     /// the iteration loop entirely.
     SaveCalib,
@@ -181,7 +181,7 @@ enum Cmd {
     /// this to capture a complete state report when something feels off.
     Diagnose,
     /// One-shot identify-and-match against the saved calibration data
-    /// (`/var/lib/think-touch/calib_data` — produced by `save-calib`).
+    /// (`/var/lib/synaptics-metallica-mis/calib_data` — produced by `save-calib`).
     /// On hit, prints `MATCH dbid=N subtype=M label` to stdout and
     /// exits 0. On miss / low-quality / device error, prints to stderr
     /// and exits non-zero. Suitable for `pam_exec` and similar callers.
@@ -206,7 +206,7 @@ enum Cmd {
         #[arg(long, conflicts_with = "use_saved_calib")]
         use_stored_calib: bool,
         /// Use the calibration data previously saved via `save-calib`
-        /// (file at `/var/lib/think-touch/calib_data`). Skips the
+        /// (file at `/var/lib/synaptics-metallica-mis/calib_data`). Skips the
         /// iteration loop on each run.
         #[arg(long)]
         use_saved_calib: bool,
@@ -235,7 +235,7 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
         /// Skip the fresh 3-iteration calibration and use the saved
-        /// `/var/lib/think-touch/calib_data` instead. Use this if a
+        /// `/var/lib/synaptics-metallica-mis/calib_data` instead. Use this if a
         /// fresh calibration is producing odd device behaviour.
         #[arg(long)]
         use_saved_calib: bool,
@@ -348,16 +348,16 @@ fn hint_for(err: &Error) -> Option<&'static str> {
     }
     Some(concat!(
         "hint: the kernel refused to open the sensor for this user.\n",
-        "      think-touch ships a udev rule that grants access to the\n",
+        "      synaptics-metallica-mis ships a udev rule that grants access to the\n",
         "      active console session. Install it once with:\n",
         "\n",
-        "        sudo install -m 644 packaging/udev/70-think-touch.rules \\\n",
+        "        sudo install -m 644 packaging/udev/70-synaptics-metallica-mis.rules \\\n",
         "          /etc/udev/rules.d/\n",
         "        sudo udevadm control --reload\n",
         "        sudo udevadm trigger --action=add \\\n",
         "          --attr-match=idVendor=06cb --attr-match=idProduct=009a\n",
         "\n",
-        "      No replug needed. After that, `think-touch` runs without sudo.",
+        "      No replug needed. After that, `synaptics-metallica-mis` runs without sudo.",
     ))
 }
 
@@ -446,7 +446,7 @@ fn version() -> Result<()> {
             "         Upstream `python-validity` automates the download / extraction"
         );
         eprintln!(
-            "         (see its `validity-sensors-firmware` script). think-touch does"
+            "         (see its `validity-sensors-firmware` script). synaptics-metallica-mis does"
         );
         eprintln!("         not yet upload fwext.");
         eprintln!();
@@ -1106,7 +1106,7 @@ fn frame_to_pgm(hex_str: &str, out_path: &str) -> Result<()> {
 
 fn diagnose() -> Result<()> {
     use think_touch::PartitionInfo;
-    println!("=== think-touch diagnose ===\n");
+    println!("=== synaptics-metallica-mis diagnose ===\n");
 
     // Cleartext probes first — these don't require the full TLS dance.
     println!("[1/8] USB enumeration");

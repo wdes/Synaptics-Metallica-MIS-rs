@@ -20,9 +20,9 @@ name = "think_touch"
 path = "src/lib.rs"
 
 [[bin]]
-# CLI command name stays `think-touch` for ergonomics — short, fast
+# CLI command name stays `synaptics-metallica-mis` for ergonomics — short, fast
 # to type, and stable across the project's prior history.
-name = "think-touch"
+name = "synaptics-metallica-mis"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,6 +1,6 @@
 # Synaptics-Metallica-MIS-rs
 
-> CLI command: `think-touch` — library crate: `think_touch` — package: `synaptics-metallica-mis-rs`
+> CLI command: `synaptics-metallica-mis` — library crate: `think_touch` — package: `synaptics-metallica-mis-rs`
 
 A pure-Rust userspace driver for the Synaptics / Validity **Metallica MIS**
 fingerprint sensor (USB id `06cb:009a`) found on the ThinkPad P70 and a
@@ -14,7 +14,7 @@ handful of other Lenovo laptops from that era.
 > 209 unit tests, lint-clean under `-D warnings`, MPL-2.0.
 
 ```
-┌──────────────────────────── think-touch ────────────────────────────┐
+┌──────────────────── Synaptics-Metallica-MIS-rs ─────────────────────┐
 │   pair → calibrate → capture → match  ──→  user dbid + finger name  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -28,7 +28,7 @@ talks to the same family of sensors and plugs into `libfprint` /
 non-`fprintd` workflows, and the runtime story (system-wide Python +
 `libgmp` + a GLib service) is fragile to ship.
 
-`think-touch` aims to be:
+`synaptics-metallica-mis` aims to be:
 
 * **Pure Rust**, so a single static binary can drive the sensor.
 * **Library-first**, so the driver can be embedded in custom auth flows
@@ -48,18 +48,18 @@ non-`fprintd` workflows, and the runtime story (system-wide Python +
 ## Quick start
 
 ```sh
-# Build (release-mode binary lives at target/release/think-touch)
+# Build (release-mode binary lives at target/release/synaptics-metallica-mis)
 cargo build --release
 
 # Look for the sensor on the USB bus
-sudo ./target/release/think-touch list
+sudo ./target/release/synaptics-metallica-mis list
 
 # Run the full read-only health-check (no flash writes)
-sudo ./target/release/think-touch diagnose
+sudo ./target/release/synaptics-metallica-mis diagnose
 
 # Capture + match an enrolled finger
-sudo ./target/release/think-touch save-calib            # 3-pass calibration, ~1 sec
-sudo ./target/release/think-touch try-identify --use-saved-calib
+sudo ./target/release/synaptics-metallica-mis save-calib            # 3-pass calibration, ~1 sec
+sudo ./target/release/synaptics-metallica-mis try-identify --use-saved-calib
 # Press your enrolled finger when prompted. You should see:
 #
 #   ┌── MATCH ───────────────────────────────────────────┐
@@ -250,7 +250,7 @@ on-wire output (`scripts/captured/pv_cmd02_*.hex`).
 ### On disk (your laptop)
 
 ```
-/var/lib/think-touch/
+/var/lib/synaptics-metallica-mis/
 ├── session                  pairing cache (mode 0600)
 │                            key=value, host DMI + decrypted client keys
 │                            speeds up subsequent runs by skipping
@@ -284,7 +284,7 @@ The Metallica MIS has a small NOR flash split into 5 partitions:
 
 On Lenovo P70s shipped with Windows, partitions 1, 2, and 6 are
 already populated by the Synaptics OEM driver. We *read* all of them
-during a normal think-touch session; we only *write* to partition 4
+during a normal synaptics-metallica-mis session; we only *write* to partition 4
 during enrollment.
 
 ### On host hardware
@@ -306,55 +306,55 @@ the binary.
 ### Read-only diagnostics (safe to run anytime)
 
 ```sh
-think-touch list                # enumerate supported sensors on the bus
-think-touch identify            # open the first supported sensor and print descriptors
-think-touch version             # cleartext RomInfo (cmd 0x01)
-think-touch boot-info           # cleartext probes 01 / 19 / 43 02
-think-touch flash-read          # dump TLS pairing record (partition 1)
-think-touch pairing             # decrypt + verify the per-host TLS keys
-think-touch gwk                 # derive pre-TLS GWK keys offline (no I/O)
-think-touch tls-hello           # exchange a Client Hello, parse Server Hello
-think-touch tls-handshake       # full TLS-PSK handshake + RomInfo round trip
-think-touch identify-sensor     # cmd 0x75 → silicon revision (FM-3367-001 etc.)
-think-touch fwext-info          # structured fwext partition info
-think-touch flash-info          # cmd 0x3e: chip JEDEC id + partition table
-think-touch tls-read-flash <P>  # post-TLS read of partition P (1, 2, 4, 5, 6)
-think-touch db-info             # cmd 0x45: DB occupancy
-think-touch db-children <id>    # cmd 0x46: walk DB tree
-think-touch db-value <id>       # cmd 0x49: dump record bytes (avoid type-8 = templates)
-think-touch db-user-storage     # decode StgWindsor + its user list
-think-touch db-user <dbid>      # decode a single User record
-think-touch factory-bits        # cmd 0x6f: factory TLV table
-think-touch factory-calibration # subst_value byte for IDENTIFY/ENROLL
-think-touch send <hex>          # arbitrary post-TLS command (protocol exploration)
-think-touch int-watch           # passive EP 0x83 reader (Ctrl-C to stop)
-think-touch int-probe <hex>     # send <hex> + dump resulting interrupts
-think-touch int-decode <hex>    # offline decoder for an EP 0x83 event
-think-touch diagnose            # one-shot: every read-only query in sequence
-think-touch reset               # USB-reset the sensor (recovers stuck state)
-think-touch forget              # delete cached pairing record (forces re-decrypt)
+synaptics-metallica-mis list                # enumerate supported sensors on the bus
+synaptics-metallica-mis identify            # open the first supported sensor and print descriptors
+synaptics-metallica-mis version             # cleartext RomInfo (cmd 0x01)
+synaptics-metallica-mis boot-info           # cleartext probes 01 / 19 / 43 02
+synaptics-metallica-mis flash-read          # dump TLS pairing record (partition 1)
+synaptics-metallica-mis pairing             # decrypt + verify the per-host TLS keys
+synaptics-metallica-mis gwk                 # derive pre-TLS GWK keys offline (no I/O)
+synaptics-metallica-mis tls-hello           # exchange a Client Hello, parse Server Hello
+synaptics-metallica-mis tls-handshake       # full TLS-PSK handshake + RomInfo round trip
+synaptics-metallica-mis identify-sensor     # cmd 0x75 → silicon revision (FM-3367-001 etc.)
+synaptics-metallica-mis fwext-info          # structured fwext partition info
+synaptics-metallica-mis flash-info          # cmd 0x3e: chip JEDEC id + partition table
+synaptics-metallica-mis tls-read-flash <P>  # post-TLS read of partition P (1, 2, 4, 5, 6)
+synaptics-metallica-mis db-info             # cmd 0x45: DB occupancy
+synaptics-metallica-mis db-children <id>    # cmd 0x46: walk DB tree
+synaptics-metallica-mis db-value <id>       # cmd 0x49: dump record bytes (avoid type-8 = templates)
+synaptics-metallica-mis db-user-storage     # decode StgWindsor + its user list
+synaptics-metallica-mis db-user <dbid>      # decode a single User record
+synaptics-metallica-mis factory-bits        # cmd 0x6f: factory TLV table
+synaptics-metallica-mis factory-calibration # subst_value byte for IDENTIFY/ENROLL
+synaptics-metallica-mis send <hex>          # arbitrary post-TLS command (protocol exploration)
+synaptics-metallica-mis int-watch           # passive EP 0x83 reader (Ctrl-C to stop)
+synaptics-metallica-mis int-probe <hex>     # send <hex> + dump resulting interrupts
+synaptics-metallica-mis int-decode <hex>    # offline decoder for an EP 0x83 event
+synaptics-metallica-mis diagnose            # one-shot: every read-only query in sequence
+synaptics-metallica-mis reset               # USB-reset the sensor (recovers stuck state)
+synaptics-metallica-mis forget              # delete cached pairing record (forces re-decrypt)
 ```
 
 ### Capture, identify, enroll
 
 ```sh
-think-touch save-calib                                     # 3-pass calibration → /var/lib/think-touch/calib_data
-think-touch try-calibrate [--save-pgm out.pgm]             # one CALIBRATE pass; optionally PGM-render
-think-touch try-identify [--use-saved-calib | --use-stored-calib]
+synaptics-metallica-mis save-calib                                     # 3-pass calibration → /var/lib/synaptics-metallica-mis/calib_data
+synaptics-metallica-mis try-calibrate [--save-pgm out.pgm]             # one CALIBRATE pass; optionally PGM-render
+synaptics-metallica-mis try-identify [--use-saved-calib | --use-stored-calib]
                                                            # full identify + match flow with verbose trace
-think-touch match-finger                                   # one-shot identify+match; stdout: "MATCH dbid=N subtype=M …"
+synaptics-metallica-mis match-finger                                   # one-shot identify+match; stdout: "MATCH dbid=N subtype=M …"
                                                            # exit 0 = match, non-zero = no-match / low-quality / error
-think-touch enroll --subtype 1 [--sid-string S-...] --yes  # write a fingerprint (destructive, auto-retries on quality errors)
-think-touch delete-record <dbid> --yes                     # remove a user or finger record (cmd 0x48, cascades for users)
-think-touch blink                                          # exercise the LED control path
+synaptics-metallica-mis enroll --subtype 1 [--sid-string S-...] --yes  # write a fingerprint (destructive, auto-retries on quality errors)
+synaptics-metallica-mis delete-record <dbid> --yes                     # remove a user or finger record (cmd 0x48, cascades for users)
+synaptics-metallica-mis blink                                          # exercise the LED control path
 ```
 
 ### Offline decoders (no USB needed)
 
 ```sh
-think-touch dump-cmd-02 <mode>             # build cmd-02 packet from canonical inputs and hex-dump it
-think-touch frame-to-pgm <hex> <out.pgm>   # convert an EP 0x82 frame dump to grayscale PGM
-think-touch int-decode <hex>               # explain an EP 0x83 interrupt event
+synaptics-metallica-mis dump-cmd-02 <mode>             # build cmd-02 packet from canonical inputs and hex-dump it
+synaptics-metallica-mis frame-to-pgm <hex> <out.pgm>   # convert an EP 0x82 frame dump to grayscale PGM
+synaptics-metallica-mis int-decode <hex>               # explain an EP 0x83 interrupt event
 ```
 
 ## Permissions — running without `sudo`
@@ -368,31 +368,31 @@ sudo ./packaging/install.sh
 
 That:
 
-1. Copies the binary to `/usr/local/bin/think-touch`.
+1. Copies the binary to `/usr/local/bin/synaptics-metallica-mis`.
 2. Runs `setcap cap_dac_read_search+ep` on it so it can read
    `/sys/class/dmi/id/product_serial` (mode `0400 root:root` on most
    distros) without being root itself. The DMI serial is what the
    GWK key derivation needs to decrypt the device's pairing record.
 3. Installs the udev rule so the local-console user can claim the
    USB device (`uaccess` tag).
-4. Creates `/var/lib/think-touch/` with group ownership (default
-   `plugdev`, override with `THINK_TOUCH_GROUP=…`) so the pairing
+4. Creates `/var/lib/synaptics-metallica-mis/` with group ownership (default
+   `plugdev`, override with `SMM_GROUP=…`) so the pairing
    cache and saved calibration data survive across reboots without
    needing root each time.
 
 After install, plain-user invocation works:
 
 ```sh
-think-touch list
-think-touch diagnose
-think-touch match-finger
+synaptics-metallica-mis list
+synaptics-metallica-mis diagnose
+synaptics-metallica-mis match-finger
 ```
 
 If you'd rather configure things by hand, the moving parts are:
 
 - `setcap cap_dac_read_search+ep <bin>` for DMI access.
-- `packaging/udev/70-think-touch.rules` → `/etc/udev/rules.d/`.
-- `/var/lib/think-touch/` accessible to whichever group runs the
+- `packaging/udev/70-synaptics-metallica-mis.rules` → `/etc/udev/rules.d/`.
+- `/var/lib/synaptics-metallica-mis/` accessible to whichever group runs the
   binary (default install picks `plugdev`).
 
 Without setcap, the binary still works under `sudo` — the install
@@ -418,6 +418,30 @@ python3 scripts/python_validity_identify.py    # one identify cycle via python-v
 python3 scripts/walk_cmd02.py < out.hex        # parse a saved cmd-02 dump
 ```
 
+## PAM / login integration
+
+A `sudo` / `su` / `sddm` integration is shipped via `pam_exec` —
+no native PAM module needed. See
+[`packaging/pam/README.md`](./packaging/pam/README.md) for the full
+walkthrough; the gist is:
+
+```sh
+sudo install -m 0755 packaging/pam/synaptics-mis-pam.sh \
+                     /usr/local/lib/synaptics-mis-pam.sh
+
+# Then add ONE line at the top of /etc/pam.d/sudo:
+#   auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
+```
+
+After that, `sudo` prompts for a fingerprint first; on a clean match
+no password is needed. On miss / timeout it falls through to your
+existing password auth — no security regression vs the default.
+
+This gives you fingerprint authentication for `sudo`, `su`, login
+managers (sddm / lightdm), and `swaylock` immediately. Native
+fprintd/libfprint integration (so GNOME / KDE Settings see the
+sensor) is more involved and on the roadmap.
+
 ## Caveats and limitations
 
 ### ⚠ Cannot pair an un-paired device (yet)
@@ -431,7 +455,7 @@ Concretely, that means:
 
 - ✅ **ThinkPad shipped with Windows, then Linux installed** — the
   Windows Synaptics driver pairs the device on first boot, after
-  which think-touch can use it indefinitely.
+  which synaptics-metallica-mis can use it indefinitely.
 - ✅ **Device previously paired by python-validity** — we read the
   same record format and decrypt with the same GWK-key derivation.
 - ❌ **Brand-new device, never connected to Windows or python-validity** —
@@ -455,10 +479,10 @@ non-trivial** operation that requires:
 Until that lands, **if your sensor is unpaired, the only path to
 pairing it is** [`python-validity`](https://github.com/uunicorn/python-validity)
 — install it, run `python -m validitysensor.init_flash`, then come
-back to think-touch which will then read the same pairing record.
+back to synaptics-metallica-mis which will then read the same pairing record.
 
 A botched pair-from-scratch run on this hardware leaves a half-formatted
-flash that neither think-touch nor python-validity can recover from
+flash that neither synaptics-metallica-mis nor python-validity can recover from
 without serial-port-level vendor tooling. That's why we're not
 shipping it casually.
 
