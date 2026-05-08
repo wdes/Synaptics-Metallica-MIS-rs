@@ -1741,6 +1741,23 @@ fn match_finger(retries: u32) -> Result<()> {
 
         let mut consecutive_rejects: u32 = 0;
         for attempt in 1..=retries {
+            // Print the prompt BEFORE the cmd-02 so the operator sees
+            // it in time. Also pause briefly between attempts so the
+            // user can lift the finger — the device's matcher rejects
+            // a continuously-held press, so without a lift the retry
+            // just produces the same low-quality scan again.
+            if attempt == 1 {
+                eprintln!("press your enrolled finger now");
+            } else if consecutive_rejects >= CONSECUTIVE_REJECT_HINT {
+                eprintln!(
+                    "attempt {attempt}/{retries}: lift your finger fully (~1 s), then press FIRMER and centered."
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+            } else {
+                eprintln!("attempt {attempt}/{retries}: lift your finger, then press again");
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
+
             let _ = session.cmd(chan, &GLOW_START_SCAN)?;
             let pkt = build_cmd_02(
                 CaptureMode::Identify,
@@ -1763,15 +1780,6 @@ fn match_finger(retries: u32) -> Result<()> {
 
             // Drain start, finger, capture-complete events.
             let _ = chan.wait_int()?;
-            if attempt == 1 {
-                eprintln!("press your enrolled finger now");
-            } else if consecutive_rejects >= CONSECUTIVE_REJECT_HINT {
-                eprintln!(
-                    "attempt {attempt}/{retries}: lift your finger fully, then press again — firmer and centered."
-                );
-            } else {
-                eprintln!("attempt {attempt}/{retries}: press again");
-            }
             loop {
                 let evt = chan.wait_int()?;
                 if evt.first() == Some(&0x02) { break; }
@@ -1828,7 +1836,8 @@ fn match_finger(retries: u32) -> Result<()> {
                 // was discarded — retry with a better press.
                 let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
                 if verdict.first() == Some(&0x04) && attempt < retries {
-                    eprintln!("  matcher rejected scan; retrying.");
+                    consecutive_rejects += 1;
+                    eprintln!("  matcher rejected scan");
                     continue;
                 }
                 eprintln!("no match (verdict {})", hex(&verdict));
