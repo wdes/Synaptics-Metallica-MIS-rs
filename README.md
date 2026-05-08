@@ -357,46 +357,156 @@ synaptics-metallica-mis frame-to-pgm <hex> <out.pgm>   # convert an EP 0x82 fram
 synaptics-metallica-mis int-decode <hex>               # explain an EP 0x83 interrupt event
 ```
 
-## Permissions — running without `sudo`
+## Installing
 
-There's a one-shot installer in `packaging/`:
+### One-shot installer (recommended)
+
+The fastest path — handles binary install, capabilities, udev rule,
+state directory, and (optionally) PAM wiring in a single command:
 
 ```sh
 cargo build --release
-sudo ./packaging/install.sh
+sudo ./packaging/install.sh                   # base install only
+sudo ./packaging/install.sh --sudo            # base install + sudo wiring
+sudo ./packaging/install.sh --all             # sudo + su + sddm
+sudo ./packaging/install.sh --help            # full flag list
 ```
 
-That:
+Re-running is safe — every step is idempotent (binary is overwritten
+in place, udev rule is replaced, state dir uses `mkdir -p`, PAM
+edits are skipped when the marker comment is already present).
 
-1. Copies the binary to `/usr/local/bin/synaptics-metallica-mis`.
-2. Runs `setcap cap_dac_read_search+ep` on it so it can read
-   `/sys/class/dmi/id/product_serial` (mode `0400 root:root` on most
-   distros) without being root itself. The DMI serial is what the
-   GWK key derivation needs to decrypt the device's pairing record.
-3. Installs the udev rule so the local-console user can claim the
-   USB device (`uaccess` tag).
-4. Creates `/var/lib/synaptics-metallica-mis/` with group ownership (default
-   `plugdev`, override with `SMM_GROUP=…`) so the pairing
-   cache and saved calibration data survive across reboots without
-   needing root each time.
+#### What the installer does
 
-After install, plain-user invocation works:
+1. **Binary** → copied to `/usr/local/bin/synaptics-metallica-mis`
+   (mode `0755`).
+
+2. **Capabilities** → runs
+   `setcap cap_dac_read_search+ep <binary>`. This grants permission
+   to read any file regardless of DAC permissions, so the binary
+   can open `/sys/class/dmi/id/product_serial` (mode `0400 root:root`
+   on most distros) without being root. The DMI serial feeds the
+   GWK-key derivation; without it the TLS-PSK handshake fails.
+
+3. **Udev rule** → installs
+   `/etc/udev/rules.d/70-synaptics-metallica-mis.rules` and reloads
+   udev. The rule tags the USB device with `uaccess` so whoever owns
+   the active local console session inherits read/write access. No
+   group required by default; if you'd rather use a group, edit the
+   rule to `GROUP="plugdev", MODE="0660"`.
+
+4. **State directory** → creates `/var/lib/synaptics-metallica-mis/`
+   with group ownership (default `plugdev`, override with `SMM_GROUP`)
+   and mode `0770`. Houses the pairing cache (`session`) and saved
+   calibration data (`calib_data`), both mode `0600` (or `0660` if
+   the cache was first written by a non-root group member).
+
+5. **PAM wiring** *(optional, behind `--sudo` / `--su` / `--sddm` /
+   `--all`)* → copies `packaging/pam/synaptics-mis-pam.sh` to
+   `/usr/local/lib/synaptics-mis-pam.sh`, then patches each requested
+   `/etc/pam.d/<service>` to add an `auth sufficient pam_exec.so …`
+   line at the top. Before patching, the original is backed up to
+   `<service>.bak-smm`. The marker comment `# synaptics-metallica-mis`
+   above the inserted line makes future re-runs idempotent.
+
+   ⚠ After enabling PAM wiring, **always test in a NEW terminal** —
+   keep your current shell open as a recovery escape. To revert a
+   service, restore its `.bak-smm`:
+
+   ```sh
+   sudo mv /etc/pam.d/sudo.bak-smm /etc/pam.d/sudo
+   ```
+
+#### Configuration env vars
+
+| var | default | purpose |
+|---|---|---|
+| `PREFIX` | `/usr/local` | where the binary lives |
+| `BIN_SRC` | `target/release/synaptics-metallica-mis` | source path |
+| `UDEV_DIR` | `/etc/udev/rules.d` | udev rules location |
+| `STATE_DIR` | `/var/lib/synaptics-metallica-mis` | pairing cache + calib data |
+| `SMM_GROUP` | `plugdev` | unix group that owns `STATE_DIR` |
+| `PAM_LIB` | `/usr/local/lib/synaptics-mis-pam.sh` | PAM wrapper script |
+
+E.g. installing to `/opt`, with a `wheel` group:
 
 ```sh
-synaptics-metallica-mis list
-synaptics-metallica-mis diagnose
-synaptics-metallica-mis match-finger
+sudo PREFIX=/opt SMM_GROUP=wheel ./packaging/install.sh --sudo
 ```
 
-If you'd rather configure things by hand, the moving parts are:
+### Manual install
 
-- `setcap cap_dac_read_search+ep <bin>` for DMI access.
-- `packaging/udev/70-synaptics-metallica-mis.rules` → `/etc/udev/rules.d/`.
-- `/var/lib/synaptics-metallica-mis/` accessible to whichever group runs the
-  binary (default install picks `plugdev`).
+The same moves the installer assembles, run by hand:
 
-Without setcap, the binary still works under `sudo` — the install
-step is opt-in for unprivileged use.
+```sh
+# 1. Binary + capabilities
+sudo install -m 0755 target/release/synaptics-metallica-mis /usr/local/bin/
+sudo setcap cap_dac_read_search+ep /usr/local/bin/synaptics-metallica-mis
+
+# 2. Udev rule
+sudo install -m 0644 packaging/udev/70-synaptics-metallica-mis.rules \
+                     /etc/udev/rules.d/
+sudo udevadm control --reload
+sudo udevadm trigger --action=add \
+                     --attr-match=idVendor=06cb --attr-match=idProduct=009a
+
+# 3. State directory
+sudo mkdir -p /var/lib/synaptics-metallica-mis
+sudo chgrp plugdev /var/lib/synaptics-metallica-mis
+sudo chmod 0770    /var/lib/synaptics-metallica-mis
+
+# 4. (optional) PAM wrapper for sudo / su / sddm
+sudo install -m 0755 packaging/pam/synaptics-mis-pam.sh /usr/local/lib/
+# Then add ONE line at the top of /etc/pam.d/sudo (etc.):
+#   auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
+```
+
+### Verify the install
+
+```sh
+# As your unprivileged user (no sudo prefix):
+groups | grep -q plugdev && echo "in plugdev: ok"
+synaptics-metallica-mis list             # should show your sensor
+synaptics-metallica-mis save-calib       # 1 sec, populates state dir
+synaptics-metallica-mis match-finger     # press an enrolled finger
+```
+
+If `list` still asks for root, re-plug the sensor (or reboot) so
+udev re-applies the new rule.
+
+### Uninstall
+
+```sh
+# Reverse PAM wiring (if you ran --sudo / --su / --sddm)
+for svc in sudo su sddm; do
+    [ -f /etc/pam.d/$svc.bak-smm ] \
+        && sudo mv /etc/pam.d/$svc.bak-smm /etc/pam.d/$svc
+done
+
+# Remove binary, udev rule, PAM wrapper
+sudo rm -f /usr/local/bin/synaptics-metallica-mis
+sudo rm -f /etc/udev/rules.d/70-synaptics-metallica-mis.rules
+sudo rm -f /usr/local/lib/synaptics-mis-pam.sh
+sudo udevadm control --reload
+
+# Optionally also remove cached state — DESTRUCTIVE: wipes saved
+# pairing cache + calibration; you'll need to re-run save-calib
+sudo rm -rf /var/lib/synaptics-metallica-mis
+```
+
+### Migrating from the old `think-touch` directory
+
+If you used the project before the rename, the state lived at
+`/var/lib/think-touch/` instead of `/var/lib/synaptics-metallica-mis/`.
+Migrate (or just re-calibrate fresh, both work):
+
+```sh
+sudo cp /var/lib/think-touch/session    /var/lib/synaptics-metallica-mis/session
+sudo cp /var/lib/think-touch/calib_data /var/lib/synaptics-metallica-mis/calib_data
+sudo chgrp plugdev /var/lib/synaptics-metallica-mis/{session,calib_data}
+sudo chmod 0660    /var/lib/synaptics-metallica-mis/{session,calib_data}
+sudo rm -rf /var/lib/think-touch/
+```
 
 ## Testing
 
@@ -420,27 +530,21 @@ python3 scripts/walk_cmd02.py < out.hex        # parse a saved cmd-02 dump
 
 ## PAM / login integration
 
-A `sudo` / `su` / `sddm` integration is shipped via `pam_exec` —
-no native PAM module needed. See
-[`packaging/pam/README.md`](./packaging/pam/README.md) for the full
-walkthrough; the gist is:
+`sudo` / `su` / `sddm` authentication via fingerprint is shipped
+through `pam_exec` — no native PAM module needed. The
+[Installing](#installing) section above covers the install side via
+the `--sudo` / `--su` / `--sddm` / `--all` flags on
+`packaging/install.sh`. For the design rationale, what the wrapper
+script does, and which login managers are known to work, see
+[`packaging/pam/README.md`](./packaging/pam/README.md).
 
-```sh
-sudo install -m 0755 packaging/pam/synaptics-mis-pam.sh \
-                     /usr/local/lib/synaptics-mis-pam.sh
+After PAM wiring, `sudo` prompts for a fingerprint first; on a clean
+match no password is needed. On miss / timeout PAM falls through to
+your existing password auth — no security regression vs the default.
 
-# Then add ONE line at the top of /etc/pam.d/sudo:
-#   auth   sufficient   pam_exec.so   /usr/local/lib/synaptics-mis-pam.sh
-```
-
-After that, `sudo` prompts for a fingerprint first; on a clean match
-no password is needed. On miss / timeout it falls through to your
-existing password auth — no security regression vs the default.
-
-This gives you fingerprint authentication for `sudo`, `su`, login
-managers (sddm / lightdm), and `swaylock` immediately. Native
-fprintd/libfprint integration (so GNOME / KDE Settings see the
-sensor) is more involved and on the roadmap.
+Native fprintd / libfprint integration (so GNOME / KDE Settings see
+the sensor through their normal D-Bus pipes) is on the roadmap; see
+[`TODO.md`](./TODO.md).
 
 ## Caveats and limitations
 
