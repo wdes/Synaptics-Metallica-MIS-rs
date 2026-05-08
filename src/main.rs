@@ -620,17 +620,16 @@ fn load_or_decrypt_pairing(chan: &mut Channel) -> Result<cache::PairingCache> {
         ecdh_q: q,
     };
     if let Err(e) = cached.save(cache_path) {
-        // EACCES typically means the file exists but is owned by another
-        // user (e.g. migrated from /var/lib/think-touch/ via `sudo cp`,
-        // which leaves the file root-owned with mode 0600). Surface the
-        // exact fix instead of dropping a generic Permission denied.
+        // EACCES means the file exists but is owned by another user
+        // (the cache directory's group-write doesn't help us truncate
+        // a foreign-owned file). Print the exact fix.
         if e.kind() == std::io::ErrorKind::PermissionDenied {
             eprintln!(
-                "warn: could not write pairing cache to {} (Permission denied).\n\
+                "warn: could not write pairing cache to {0} (Permission denied).\n\
                  \n\
-                 The cache file likely exists but is owned by another user (often\n\
-                 root, after a `sudo cp` migration). The session works fine — the\n\
-                 next run will redo the flash decrypt unless the cache is fixable.\n\
+                 The file exists but is owned by another user, so even though the\n\
+                 directory is group-writable we can't truncate it. The session\n\
+                 itself is fine — only the cache write failed.\n\
                  \n\
                  To make the cache user-writable (assumes you're in the `plugdev`\n\
                  group from packaging/install.sh):\n\

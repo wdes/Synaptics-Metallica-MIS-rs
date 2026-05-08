@@ -494,20 +494,6 @@ sudo udevadm control --reload
 sudo rm -rf /var/lib/synaptics-metallica-mis
 ```
 
-### Migrating from the old `think-touch` directory
-
-If you used the project before the rename, the state lived at
-`/var/lib/think-touch/` instead of `/var/lib/synaptics-metallica-mis/`.
-Migrate (or just re-calibrate fresh, both work):
-
-```sh
-sudo cp /var/lib/think-touch/session    /var/lib/synaptics-metallica-mis/session
-sudo cp /var/lib/think-touch/calib_data /var/lib/synaptics-metallica-mis/calib_data
-sudo chgrp plugdev /var/lib/synaptics-metallica-mis/{session,calib_data}
-sudo chmod 0660    /var/lib/synaptics-metallica-mis/{session,calib_data}
-sudo rm -rf /var/lib/think-touch/
-```
-
 ## Testing
 
 ```sh
