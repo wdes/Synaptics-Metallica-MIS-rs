@@ -23,7 +23,31 @@ pub struct HostId {
 impl HostId {
     pub fn read() -> Self {
         let product_name = read_dmi("/sys/class/dmi/id/product_name").unwrap_or_else(|| "VirtualBox".into());
-        let product_serial = read_dmi("/sys/class/dmi/id/product_serial").unwrap_or_else(|| "0".into());
+        let product_serial = read_dmi("/sys/class/dmi/id/product_serial").unwrap_or_else(|| {
+            // /sys/class/dmi/id/product_serial is mode 0400 root-only on
+            // most distros for security. If we can't read it, the
+            // GWK-key derivation falls back to "0", which produces the
+            // wrong PSK and the device rejects our handshake. Surface
+            // a clear hint instead of silently failing.
+            eprintln!(
+                "warning: /sys/class/dmi/id/product_serial is unreadable.\n\
+                 \n\
+                 The GWK key derivation needs the host's DMI serial; without it,\n\
+                 the TLS-PSK handshake will fail with `HMAC mismatch` or `bad MAC`.\n\
+                 \n\
+                 Two ways to fix:\n\
+                   1. Re-run with sudo (one-shot).\n\
+                   2. Grant the binary CAP_DAC_READ_SEARCH so it can read\n\
+                      DMI without root:\n\
+                          sudo setcap cap_dac_read_search+ep <path-to-think-touch>\n\
+                      Or run the installer:\n\
+                          sudo ./packaging/install.sh\n\
+                 \n\
+                 Falling back to the python-validity stub serial \"0\" — handshake\n\
+                 will almost certainly fail."
+            );
+            "0".into()
+        });
         Self { product_name, product_serial }
     }
 }

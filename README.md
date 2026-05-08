@@ -357,20 +357,46 @@ think-touch frame-to-pgm <hex> <out.pgm>   # convert an EP 0x82 frame dump to gr
 think-touch int-decode <hex>               # explain an EP 0x83 interrupt event
 ```
 
-## Permissions
+## Permissions — running without `sudo`
 
-To talk to the sensor without root, install the udev rules shipped in
-`packaging/udev/`:
+There's a one-shot installer in `packaging/`:
 
 ```sh
-sudo install -m 644 packaging/udev/70-think-touch.rules /etc/udev/rules.d/
-sudo udevadm control --reload
-sudo udevadm trigger --action=add --attr-match=idVendor=06cb --attr-match=idProduct=009a
+cargo build --release
+sudo ./packaging/install.sh
 ```
 
-Note: even with the udev rule, this binary still needs root for DMI
-serial access (`/sys/class/dmi/id/product_serial`). A future
-`setcap CAP_DAC_READ_SEARCH` step will fix this.
+That:
+
+1. Copies the binary to `/usr/local/bin/think-touch`.
+2. Runs `setcap cap_dac_read_search+ep` on it so it can read
+   `/sys/class/dmi/id/product_serial` (mode `0400 root:root` on most
+   distros) without being root itself. The DMI serial is what the
+   GWK key derivation needs to decrypt the device's pairing record.
+3. Installs the udev rule so the local-console user can claim the
+   USB device (`uaccess` tag).
+4. Creates `/var/lib/think-touch/` with group ownership (default
+   `plugdev`, override with `THINK_TOUCH_GROUP=…`) so the pairing
+   cache and saved calibration data survive across reboots without
+   needing root each time.
+
+After install, plain-user invocation works:
+
+```sh
+think-touch list
+think-touch diagnose
+think-touch match-finger
+```
+
+If you'd rather configure things by hand, the moving parts are:
+
+- `setcap cap_dac_read_search+ep <bin>` for DMI access.
+- `packaging/udev/70-think-touch.rules` → `/etc/udev/rules.d/`.
+- `/var/lib/think-touch/` accessible to whichever group runs the
+  binary (default install picks `plugdev`).
+
+Without setcap, the binary still works under `sudo` — the install
+step is opt-in for unprivileged use.
 
 ## Testing
 
@@ -391,6 +417,50 @@ python3 scripts/cross_check_gwk.py             # GWK keys against python-validit
 python3 scripts/python_validity_identify.py    # one identify cycle via python-validity
 python3 scripts/walk_cmd02.py < out.hex        # parse a saved cmd-02 dump
 ```
+
+## Caveats and limitations
+
+### ⚠ Cannot pair an un-paired device (yet)
+
+This driver only works on devices that are **already paired** by either
+the Lenovo Windows Synaptics OEM driver or by `python-validity`'s
+`init_flash` flow. We *read* the existing pairing record from flash
+partition 1; we do not yet write a fresh one.
+
+Concretely, that means:
+
+- ✅ **ThinkPad shipped with Windows, then Linux installed** — the
+  Windows Synaptics driver pairs the device on first boot, after
+  which think-touch can use it indefinitely.
+- ✅ **Device previously paired by python-validity** — we read the
+  same record format and decrypt with the same GWK-key derivation.
+- ❌ **Brand-new device, never connected to Windows or python-validity** —
+  flash partition 1 is empty, our handshake fails with
+  `pairing record is malformed: priv key prefix is not 0x02`.
+- ❌ **Device that's been factory-reset** — same as above.
+
+Implementing pair-from-scratch is on the roadmap but is a **destructive,
+non-trivial** operation that requires:
+
+1. The vendor `reset_blob` capsule (~250 bytes) — not yet ported from
+   `python-validity/blobs_9a.py`.
+2. A 256-byte `partition_signature` blob hardcoded per device family.
+3. A new flash-format flow (cmds `0x40`/`0x42` wrapped in
+   `db_write_enable`) that erases partitions 1, 2, 4, 5, 6.
+4. A `make_tls_flash` builder that assembles the cert + encrypted
+   priv key + ECDH-q records and writes them back to partition 1.
+5. The encrypt direction of `crypto::aes256_cbc_decrypt` (we currently
+   only have decrypt for reading the existing record).
+
+Until that lands, **if your sensor is unpaired, the only path to
+pairing it is** [`python-validity`](https://github.com/uunicorn/python-validity)
+— install it, run `python -m validitysensor.init_flash`, then come
+back to think-touch which will then read the same pairing record.
+
+A botched pair-from-scratch run on this hardware leaves a half-formatted
+flash that neither think-touch nor python-validity can recover from
+without serial-port-level vendor tooling. That's why we're not
+shipping it casually.
 
 ## Prior art and protocol references
 
