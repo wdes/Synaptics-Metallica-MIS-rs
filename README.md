@@ -1,4 +1,6 @@
-# think-touch
+# Synaptics-Metallica-MIS-rs
+
+> CLI command: `think-touch` — library crate: `think_touch` — package: `synaptics-metallica-mis-rs`
 
 A pure-Rust userspace driver for the Synaptics / Validity **Metallica MIS**
 fingerprint sensor (USB id `06cb:009a`) found on the ThinkPad P70 and a

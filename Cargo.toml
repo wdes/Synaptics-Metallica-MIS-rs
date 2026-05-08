@@ -1,21 +1,27 @@
 [package]
-name = "think-touch"
+# crates.io requires lowercase ASCII for the package name; the
+# project's display name is "Synaptics-Metallica-MIS-rs" — see README.
+name = "synaptics-metallica-mis-rs"
 version = "0.0.1"
 edition = "2024"
 rust-version = "1.92"
 authors = ["William Desportes <williamdes@wdes.fr>"]
 license = "MPL-2.0"
-description = "Pure-Rust userspace driver for the Synaptics/Validity Metallica MIS (06cb:009a) fingerprint sensor found on the ThinkPad P70."
-repository = "https://github.com/wdes/think-touch"
+description = "Synaptics-Metallica-MIS-rs — pure-Rust userspace driver for the Synaptics/Validity Metallica MIS (06cb:009a) fingerprint sensor found on the ThinkPad P70 and other Lenovo laptops."
+repository = "https://github.com/wdes/Synaptics-Metallica-MIS-rs"
 readme = "README.md"
 keywords = ["fingerprint", "synaptics", "validity", "thinkpad", "usb"]
 categories = ["hardware-support", "command-line-utilities"]
 
 [lib]
+# Library import path stays `think_touch` for source compatibility —
+# all internal crates and tests `use think_touch::…`.
 name = "think_touch"
 path = "src/lib.rs"
 
 [[bin]]
+# CLI command name stays `think-touch` for ergonomics — short, fast
+# to type, and stable across the project's prior history.
 name = "think-touch"
 path = "src/main.rs"
 

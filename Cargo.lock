@@ -701,7 +701,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "think-touch"
+name = "synaptics-metallica-mis-rs"
 version = "0.0.1"
 dependencies = [
  "aes",
