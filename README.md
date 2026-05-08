@@ -63,9 +63,9 @@ sudo ./target/release/think-touch try-identify --use-saved-calib
 # Press your enrolled finger when prompted. You should see:
 #
 #   ┌── MATCH ──────────────────────────────────────────┐
-#   │  user dbid : 5
-#   │  finger    : 1 (right-thumb)
-#   │  hash[..8] : 322987beb350cefa…
+#   │  user dbid : 5                                     │
+#   │  finger    : 1 (right-thumb)                       │
+#   │  hash[..8] : 322987beb350cefa…                     │
 #   └────────────────────────────────────────────────────┘
 ```
 
@@ -83,7 +83,7 @@ The driver is a stack of independently-testable layers:
 │   bitpack / find_nth_insn / Line / parse_calibration            │
 ├─────────────────────────────────────────────────────────────────┤
 │  TLS-PSK session        (src/handshake.rs, src/tls.rs)          │
-│   ClientHello → KEX → Finished     bidirectional record I/O      │
+│   ClientHello → KEX → Finished    bidirectional record I/O      │
 │   Custom Synaptics framing + validity-padded AES-256-CBC        │
 ├─────────────────────────────────────────────────────────────────┤
 │  Pairing record         (src/pairing.rs)                        │
@@ -94,7 +94,7 @@ The driver is a stack of independently-testable layers:
 │   RomInfo / PartitionInfo / FlashLayout / CaptureStatus parsers │
 ├─────────────────────────────────────────────────────────────────┤
 │  USB transport          (src/usb.rs)                            │
-│   nusb 0.2 — endpoint 0x01 OUT / 0x81 IN / 0x82 IN / 0x83 INT  │
+│   nusb 0.2 — endpoint 0x01 OUT / 0x81 IN / 0x82 IN / 0x83 INT   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -235,7 +235,7 @@ matcher reads sensor noise and fires a phantom-touch sentinel.
             │ [11] 0x004e  IDENTIFY-mode marker                   │
             │ [12] 0x002e  Image Reconstruction                   │
             │ [13] 0x0044  Interleave  (← line_update_type_1      │
-            │ [14] 0x0030  Line Update     emits these three     │
+            │ [14] 0x0030  Line Update     emits these three      │
             │ [15] 0x0043  Update Transform   chunks)             │
             └─────────────────────────────────────────────────────┘
 ```
@@ -401,6 +401,8 @@ python3 scripts/walk_cmd02.py < out.hex        # parse a saved cmd-02 dump
   original reverse-engineering effort and protocol notes for the family.
 * [Reversing a Fingerprint Reader Protocol — Neodyme](https://neodyme.io/en/blog/fingerprint_reversing/)
   — write-up of the TLS-PSK-over-USB scheme used by these sensors.
+* [r/archlinux thread on `06cb:009a`](https://www.reddit.com/r/archlinux/comments/1t2hzvo/06cb009a_synaptics_metallica_mis_anyone_got_it/)
+  — community discussion of the device on Linux.
 
 ## Attribution
 
