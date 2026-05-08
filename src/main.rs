@@ -226,6 +226,11 @@ enum Cmd {
         /// Skip the confirmation prompt before writing flash.
         #[arg(long)]
         yes: bool,
+        /// Skip the fresh 3-iteration calibration and use the saved
+        /// `/var/lib/think-touch/calib_data` instead. Use this if a
+        /// fresh calibration is producing odd device behaviour.
+        #[arg(long)]
+        use_saved_calib: bool,
     },
     /// **Destructive** — delete a record from the device's template
     /// database (cmd `0x48`). Use with `db-info` / `db-children` /
@@ -301,7 +306,9 @@ fn main() -> ExitCode {
         Cmd::TryIdentify { use_stored_calib, use_saved_calib } => {
             try_identify(use_stored_calib, use_saved_calib)
         }
-        Cmd::Enroll { subtype, sid_string, yes } => enroll_cmd(subtype, &sid_string, yes),
+        Cmd::Enroll { subtype, sid_string, yes, use_saved_calib } => {
+            enroll_cmd(subtype, &sid_string, yes, use_saved_calib)
+        }
         Cmd::DeleteRecord { dbid, yes } => delete_record_cmd(dbid, yes),
     };
     match result {
@@ -1235,8 +1242,10 @@ fn write_enable_then(
 }
 
 #[allow(clippy::too_many_lines)]
-fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
+fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) -> Result<()> {
+    use std::path::Path;
     use think_touch::blobs::{GLOW_END_SCAN, GLOW_START_SCAN};
+    use think_touch::cache::CALIB_DATA_PATH;
     use think_touch::capture::{
         CaptureMode, average_interleaved, build_cmd_02, get_key_line,
         process_calibration_results,
@@ -1301,34 +1310,64 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool) -> Result<()> {
         println!("│  If you Ctrl-C, the LED may stay on — run `reset` after.   │");
         println!("└────────────────────────────────────────────────────────────┘");
 
-        let mut calib_data: Vec<u8> = Vec::new();
-        for iter in 1..=CALIBRATION_ITERATIONS {
-            let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
-            let pkt = build_cmd_02(
-                CaptureMode::Calibrate,
-                &FM_3367_001_PROG,
-                &FM_3367_001,
-                &key_line,
-                CALIBRATION_FRAMES,
-                LINES_PER_FRAME,
-                0,
-                &[],
-                &[],
-            )?;
-            let resp = session.cmd(chan, &pkt)?;
-            let (status, _) = split_status(&resp)?;
-            if status != 0 {
-                eprintln!("calibrate iter {iter}: status {}", fmt_status(status));
+        let calib_data: Vec<u8> = if use_saved_calib {
+            let path = Path::new(CALIB_DATA_PATH);
+            if !path.exists() {
+                eprintln!("--use-saved-calib: no calib_data at {} — run `save-calib` first.",
+                          path.display());
                 return Ok(());
             }
-            let raw = chan.read_async()?;
-            let cooked = average_interleaved(&raw, &FM_3367_001, LINES_PER_FRAME as u32, CALIBRATION_FRAMES as u32);
-            process_calibration_results(&mut calib_data, &cooked, FM_3367_001.bytes_per_line as usize);
-            println!("  calibrate iter {iter}/{CALIBRATION_ITERATIONS} ok");
-        }
+            let bytes = std::fs::read(path)?;
+            println!("[saved-calib] loaded {} B from {}", bytes.len(), path.display());
+            bytes
+        } else {
+            let mut buf: Vec<u8> = Vec::new();
+            for iter in 1..=CALIBRATION_ITERATIONS {
+                let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &buf);
+                let pkt = build_cmd_02(
+                    CaptureMode::Calibrate,
+                    &FM_3367_001_PROG,
+                    &FM_3367_001,
+                    &key_line,
+                    CALIBRATION_FRAMES,
+                    LINES_PER_FRAME,
+                    0,
+                    &[],
+                    &[],
+                )?;
+                let resp = session.cmd(chan, &pkt)?;
+                let (status, _) = split_status(&resp)?;
+                if status != 0 {
+                    eprintln!("calibrate iter {iter}: status {}", fmt_status(status));
+                    return Ok(());
+                }
+                let raw = chan.read_async()?;
+                let cooked = average_interleaved(
+                    &raw,
+                    &FM_3367_001,
+                    LINES_PER_FRAME as u32,
+                    CALIBRATION_FRAMES as u32,
+                );
+                process_calibration_results(
+                    &mut buf,
+                    &cooked,
+                    FM_3367_001.bytes_per_line as usize,
+                );
+                println!("  calibrate iter {iter}/{CALIBRATION_ITERATIONS} ok");
+            }
+            buf
+        };
         let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
 
-        // 2. create_enrollment (cmd 0x69 01).
+        // 2. Defensive: end any prior enrollment session (cmd 0x69 0)
+        //    before starting a new one. If the previous run was Ctrl-C'd
+        //    during enroll, the device may still consider an enrolment
+        //    "open"; create_enrollment then succeeds but capture(ENROLL)
+        //    never emits matcher events. Status is ignored — if there's
+        //    nothing to end, it returns harmlessly.
+        let _ = session.cmd(chan, &build_enrollment_mode(0));
+
+        //    create_enrollment (cmd 0x69 01).
         let resp = session.cmd(chan, &build_enrollment_mode(1))?;
         let (s, _) = split_status(&resp)?;
         if s != 0 {
