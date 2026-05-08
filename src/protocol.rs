@@ -75,6 +75,8 @@ pub fn status_label(status: u16) -> Option<&'static str> {
         0x0000 => None,
         0x04b0 => Some("no firmware-extension loaded (clean slate)"),
         0x04b3 => Some("record not found"),
+        0x04c3 => Some("duplicate enrolment (this finger/subtype is already in the DB)"),
+        0x04f5 => Some("matcher state error (cmd 0x60 with no pending match, or scan rejected)"),
         0x0491 => Some("nothing to commit (cleanup no-op)"),
         0x0007 => Some("device-side scan / parameter error"),
         0x0316 => Some("not a status word — looks like a TLS Alert (0x16 type misread as LE u16)"),
