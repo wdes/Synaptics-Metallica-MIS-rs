@@ -1305,9 +1305,17 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
         println!("subst_value: 0x{subst_value:02x}");
         println!();
         println!("┌────────────────────────────────────────────────────────────┐");
-        println!("│  ENROLL: place your finger ~8-12 times when prompted.      │");
-        println!("│  The LED briefly lights at the start of each press cycle.  │");
-        println!("│  If you Ctrl-C, the LED may stay on — run `reset` after.   │");
+        println!("│  ENROLL — repeated press cycles for finger {subtype:<2} ({label:<22})│",
+                 label = subtype_label);
+        println!("│                                                            │");
+        println!("│  Each press cycle:                                         │");
+        println!("│    Waiting for finger…  →  place finger on sensor          │");
+        println!("│    Reading — hold STILL for 2-3 seconds…                   │");
+        println!("│    ✓ Reading OK!  or  ✗ Too quick — press firmer, hold.   │");
+        println!("│                                                            │");
+        println!("│  After ~8 good captures the device emits a final tid and  │");
+        println!("│  the finger record is written to flash partition 4.       │");
+        println!("│  If you Ctrl-C, the LED may stay on — run `reset` after.  │");
         println!("└────────────────────────────────────────────────────────────┘");
 
         let calib_data: Vec<u8> = if use_saved_calib {
@@ -1410,9 +1418,11 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 return Ok(());
             }
+            use std::io::Write as _;
+            println!();
             println!(
-                "\n[attempt {attempts}/{MAX_ATTEMPTS}, good={good_presses}/{MAX_GOOD_PRESSES}] \
-                 → place finger when LED lights, hold ~2 s, release."
+                "─── attempt {attempts}/{MAX_ATTEMPTS} · good {good_presses}/{MAX_GOOD_PRESSES} \
+                 · finger {subtype} ({subtype_label}) ───"
             );
             let _ = session.cmd(chan, &GLOW_START_SCAN)?;
 
@@ -1430,19 +1440,24 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                 &calib_data,
             )?;
             let resp = session.cmd(chan, &pkt)?;
-            let (status, payload) = split_status(&resp)?;
+            let (status, _) = split_status(&resp)?;
             if status != 0 {
                 eprintln!("  fatal: capture(ENROLL) rejected: {}", fmt_status(status));
                 let _ = session.cmd(chan, &GLOW_END_SCAN);
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 return Ok(());
             }
-            println!("  cmd-02 OK ({} B reply); waiting for events…", payload.len());
+
+            // State machine: Waiting → Reading → outcome.
+            // Each transition uses `\r` to overwrite the prior state on
+            // the same row, keeping the per-attempt UI compact.
+            print!("  Waiting for finger…");
+            let _ = std::io::stdout().flush();
 
             // start (expect b[0]==0)
             let evt = chan.wait_int()?;
             if evt.first() != Some(&0x00) {
-                eprintln!("  warn: expected start b[0]=0x00, got {}", hex(&evt));
+                eprintln!("\n  warn: expected start b[0]=0x00, got {}", hex(&evt));
             }
             // Wait for the finger event (b[0]==2).
             loop {
@@ -1451,7 +1466,9 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     break;
                 }
             }
-            print!("  finger detected; ");
+            print!("\r  Reading — hold finger STILL for 2-3 seconds…    ");
+            let _ = std::io::stdout().flush();
+
             // Wait for capture-complete (b[0]==3 with bit 0x04 set).
             loop {
                 let evt = chan.wait_int()?;
@@ -1459,7 +1476,6 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     break;
                 }
             }
-            println!("capture complete.");
 
             // get_prg_status2: error == 0 = good scan. Anything else
             // (we observe 0x00080000 ≈ "low quality" on this device) is
@@ -1467,20 +1483,21 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
             let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
             let (status, payload) = split_status(&resp)?;
             if status != 0 {
-                eprintln!("  prg_status fail: {} — retrying.", fmt_status(status));
+                println!("\r  ✗ Device error: {}                          ", fmt_status(status));
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
             let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
             if cs.error != 0 {
+                // 0x00080000 = "too quick" / "poor contact" most often
+                // on this device. Tell the user what to change.
                 println!(
-                    "  scan rejected (error=0x{:08x} — likely low-quality press); retry.",
-                    cs.error,
+                    "\r  ✗ Too quick or off-center — press FIRMER, hold longer. "
                 );
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
-            println!("  scan OK: x={} y={} w1={} w2={}", cs.x, cs.y, cs.w1, cs.w2);
+            println!("\r  ✓ Reading OK!                                       ");
 
             // 3b. enrollment_update_start (cmd 0x68 + wait_int).
             let resp = session.cmd(chan, &build_enrollment_update_start(key))?;
@@ -1548,11 +1565,11 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                 prev_template = np;
             }
             if let Some(progress) = header_progress {
-                let bits = progress.count_ones();
-                println!(
-                    "  progress: 0x{progress:04x} ({} of ~5 bits set) — press again.",
-                    bits,
-                );
+                let bits = progress.count_ones() as usize;
+                let bar: String = (0..5)
+                    .map(|i| if i < bits { '●' } else { '○' })
+                    .collect();
+                println!("    progress: {bar}  ({bits}/5 features captured)");
             }
             if let Some(t) = tid {
                 final_tid = t;
