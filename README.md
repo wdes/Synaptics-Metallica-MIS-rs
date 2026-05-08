@@ -62,7 +62,7 @@ sudo ./target/release/think-touch save-calib            # 3-pass calibration, ~1
 sudo ./target/release/think-touch try-identify --use-saved-calib
 # Press your enrolled finger when prompted. You should see:
 #
-#   ┌── MATCH ──────────────────────────────────────────┐
+#   ┌── MATCH ───────────────────────────────────────────┐
 #   │  user dbid : 5                                     │
 #   │  finger    : 1 (right-thumb)                       │
 #   │  hash[..8] : 322987beb350cefa…                     │
@@ -126,7 +126,7 @@ EP 0x83  ◄─── intr  IN ────    asynchronous events
 A typical IDENTIFY round-trip looks like this:
 
 ```
-   host                                          device
+    host                                       device
     │                                              │
     │── cmd 0x02 IDENTIFY (13 729 B) ─────────────►│
     │                                              │

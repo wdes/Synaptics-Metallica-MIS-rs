@@ -180,13 +180,21 @@ enum Cmd {
     /// factory-calibration, db-info) and prints a one-page summary. Use
     /// this to capture a complete state report when something feels off.
     Diagnose,
-    /// Run the matcher (cmd 0x5e) and ask for a match against any
-    /// enrolled finger in any user storage. Must be called immediately
-    /// after a successful IDENTIFY capture (i.e. once `try-identify`
-    /// reports `error=0x00000000` from `get_prg_status2`). Currently
-    /// stubbed — wire format is documented in
-    /// `python-validity/sensor.py:865-895` but not yet wired.
-    MatchFinger,
+    /// One-shot identify-and-match against the saved calibration data
+    /// (`/var/lib/think-touch/calib_data` — produced by `save-calib`).
+    /// On hit, prints `MATCH dbid=N subtype=M label` to stdout and
+    /// exits 0. On miss / low-quality / device error, prints to stderr
+    /// and exits non-zero. Suitable for `pam_exec` and similar callers.
+    ///
+    /// Auto-retries up to `--retries` times on low-quality scans, with
+    /// a hint asking the operator to lift+re-press after 2 consecutive
+    /// rejects on the same finger.
+    MatchFinger {
+        /// Maximum number of capture attempts before giving up. Each
+        /// attempt prompts for a press. Default: 5.
+        #[arg(long, default_value_t = 5)]
+        retries: u32,
+    },
     /// First real fingerprint scan: glow-start, IDENTIFY capture using
     /// the device's own calibration data + factory_calibration_values
     /// from its flash, drain EP 0x82, glow-end. Press the finger
@@ -299,7 +307,7 @@ fn main() -> ExitCode {
         Cmd::IntWatch => int_watch(),
         Cmd::IntDecode { hex } => int_decode(&hex),
         Cmd::IntProbe { hex, count } => int_probe(&hex, count),
-        Cmd::MatchFinger => match_finger(),
+        Cmd::MatchFinger { retries } => match_finger(retries),
         Cmd::Diagnose => diagnose(),
         Cmd::FrameToPgm { hex, out } => frame_to_pgm(&hex, &out),
         Cmd::DumpCmd02 { mode, out } => dump_cmd_02(&mode, out.as_deref()),
@@ -1694,17 +1702,23 @@ fn delete_record_cmd(dbid: u16, yes: bool) -> Result<()> {
 ///
 /// Designed for `pam_exec` and other "did this finger authenticate?"
 /// callers — terse stdout, exit code carries the verdict.
-fn match_finger() -> Result<()> {
+fn match_finger(retries: u32) -> Result<()> {
     use std::path::Path;
     use think_touch::blobs::{GLOW_END_SCAN, GLOW_START_SCAN};
     use think_touch::cache::CALIB_DATA_PATH;
     use think_touch::capture::{CaptureMode, build_cmd_02, get_key_line};
-    use think_touch::db::subtype_name;
     use think_touch::sensor_types::{FM_3367_001, FM_3367_001_PROG};
 
     const KEY_CAL_LINE: u32 = 0x38;
     const LINES_PER_FRAME: u16 = 224;
     const CALIBRATION_FRAMES: u16 = 3;
+    // After this many CONSECUTIVE quality rejects we stop assuming the
+    // operator is going to keep trying with the same press posture and
+    // surface a "lift the finger and try again" hint. A press that's
+    // landing at exactly the same low-quality threshold twice in a row
+    // is unlikely to magically improve on attempt 3 without the user
+    // breaking contact. Mirrors the user feedback that drove this knob.
+    const CONSECUTIVE_REJECT_HINT: u32 = 2;
 
     // We require a saved calib file (run `save-calib` first). Live
     // calibration in this path would add ~1 s latency on every match
@@ -1725,115 +1739,149 @@ fn match_finger() -> Result<()> {
             .ok_or(Error::PairingMalformed { reason: "factory_calibration_values too short" })?;
         let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
 
-        let _ = session.cmd(chan, &GLOW_START_SCAN)?;
-        let pkt = build_cmd_02(
-            CaptureMode::Identify,
-            &FM_3367_001_PROG,
-            &FM_3367_001,
-            &key_line,
-            CALIBRATION_FRAMES,
-            LINES_PER_FRAME,
-            subst_value,
-            &factory_cal_values,
-            &calib_data,
-        )?;
-        let resp = session.cmd(chan, &pkt)?;
-        let (status, _) = split_status(&resp)?;
-        if status != 0 {
-            let _ = session.cmd(chan, &GLOW_END_SCAN);
-            eprintln!("capture rejected: {}", fmt_status(status));
-            return Err(Error::PairingMalformed { reason: "capture rejected" });
-        }
-
-        // Drain start, finger, capture-complete events.
-        let _ = chan.wait_int()?;
-        eprintln!("press your enrolled finger now");
-        loop {
-            let evt = chan.wait_int()?;
-            if evt.first() == Some(&0x02) { break; }
-        }
-        loop {
-            let evt = chan.wait_int()?;
-            if evt.first() == Some(&0x03) && evt.len() >= 3 && (evt[2] & 0x04) != 0 {
-                break;
+        let mut consecutive_rejects: u32 = 0;
+        for attempt in 1..=retries {
+            let _ = session.cmd(chan, &GLOW_START_SCAN)?;
+            let pkt = build_cmd_02(
+                CaptureMode::Identify,
+                &FM_3367_001_PROG,
+                &FM_3367_001,
+                &key_line,
+                CALIBRATION_FRAMES,
+                LINES_PER_FRAME,
+                subst_value,
+                &factory_cal_values,
+                &calib_data,
+            )?;
+            let resp = session.cmd(chan, &pkt)?;
+            let (status, _) = split_status(&resp)?;
+            if status != 0 {
+                let _ = session.cmd(chan, &GLOW_END_SCAN);
+                eprintln!("capture rejected: {}", fmt_status(status));
+                return Err(Error::PairingMalformed { reason: "capture rejected" });
             }
-        }
 
-        // Capture metadata: error must be 0 to run the matcher.
-        let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
-        let (status, payload) = split_status(&resp)?;
-        let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
-        let _ = session.cmd(chan, &GLOW_END_SCAN);
-        if status != 0 || cs.error != 0 {
-            eprintln!("scan low quality (status={}, error=0x{:08x}); retry.", fmt_status(status), cs.error);
-            return Err(Error::PairingMalformed { reason: "low quality scan" });
-        }
+            // Drain start, finger, capture-complete events.
+            let _ = chan.wait_int()?;
+            if attempt == 1 {
+                eprintln!("press your enrolled finger now");
+            } else if consecutive_rejects >= CONSECUTIVE_REJECT_HINT {
+                eprintln!(
+                    "attempt {attempt}/{retries}: lift your finger fully, then press again — firmer and centered."
+                );
+            } else {
+                eprintln!("attempt {attempt}/{retries}: press again");
+            }
+            loop {
+                let evt = chan.wait_int()?;
+                if evt.first() == Some(&0x02) { break; }
+            }
+            loop {
+                let evt = chan.wait_int()?;
+                if evt.first() == Some(&0x03) && evt.len() >= 3 && (evt[2] & 0x04) != 0 {
+                    break;
+                }
+            }
 
-        // Run matcher.
-        let mut match_cmd = Vec::with_capacity(13);
-        match_cmd.push(0x5e);
-        match_cmd.push(0x02);
-        match_cmd.push(0xff);
-        match_cmd.extend_from_slice(&0u16.to_le_bytes());
-        match_cmd.extend_from_slice(&0u16.to_le_bytes());
-        match_cmd.extend_from_slice(&1u16.to_le_bytes());
-        match_cmd.extend_from_slice(&0u16.to_le_bytes());
-        match_cmd.extend_from_slice(&0u16.to_le_bytes());
-        let resp = session.cmd(chan, &match_cmd)?;
-        let (s, _) = split_status(&resp)?;
-        if s != 0 {
-            eprintln!("match cmd rejected: {}", fmt_status(s));
-            let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
-            return Err(Error::PairingMalformed { reason: "match cmd rejected" });
-        }
+            // Capture metadata: error must be 0 to run the matcher.
+            let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
+            let (status, payload) = split_status(&resp)?;
+            let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
+            if status != 0 || cs.error != 0 {
+                consecutive_rejects += 1;
+                eprintln!(
+                    "  scan rejected (status={}, error=0x{:08x})",
+                    fmt_status(status), cs.error,
+                );
+                if attempt == retries {
+                    let _ = session.cmd(chan, &GLOW_END_SCAN);
+                    return Err(Error::PairingMalformed { reason: "low quality scan after retries" });
+                }
+                continue;
+            }
+            consecutive_rejects = 0;
+            let _ = session.cmd(chan, &GLOW_END_SCAN);
 
-        // Wait for verdict.
-        let verdict = chan.wait_int()?;
-        if verdict.first() != Some(&0x03) {
-            // 0x05 = no DB match, 0x04 = matcher rejected scan; both
-            // surface as "no match" for the caller.
-            let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
-            eprintln!("no match (verdict {})", hex(&verdict));
-            return Err(Error::PairingMalformed { reason: "no match" });
+            // Run matcher.
+            let mut match_cmd = Vec::with_capacity(13);
+            match_cmd.push(0x5e);
+            match_cmd.push(0x02);
+            match_cmd.push(0xff);
+            match_cmd.extend_from_slice(&0u16.to_le_bytes());
+            match_cmd.extend_from_slice(&0u16.to_le_bytes());
+            match_cmd.extend_from_slice(&1u16.to_le_bytes());
+            match_cmd.extend_from_slice(&0u16.to_le_bytes());
+            match_cmd.extend_from_slice(&0u16.to_le_bytes());
+            let resp = session.cmd(chan, &match_cmd)?;
+            let (s, _) = split_status(&resp)?;
+            if s != 0 {
+                eprintln!("match cmd rejected: {}", fmt_status(s));
+                let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+                return Err(Error::PairingMalformed { reason: "match cmd rejected" });
+            }
+
+            // Wait for verdict.
+            let verdict = chan.wait_int()?;
+            if verdict.first() != Some(&0x03) {
+                // 0x05 = no DB match, 0x04 = matcher rejected scan.
+                // 0x05 is final ("not enrolled"); 0x04 means the scan
+                // was discarded — retry with a better press.
+                let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+                if verdict.first() == Some(&0x04) && attempt < retries {
+                    eprintln!("  matcher rejected scan; retrying.");
+                    continue;
+                }
+                eprintln!("no match (verdict {})", hex(&verdict));
+                return Err(Error::PairingMalformed { reason: "no match" });
+            }
+            // Fall through to result fetch below.
+            return fetch_match_result(chan, session);
         }
+        unreachable!("loop only exits via `return`")
+    })
+}
+
+/// Common cmd 0x60 + TLV decode + structured stdout print, factored
+/// out of `match_finger` so the retry loop can call it on success.
+fn fetch_match_result(chan: &mut Channel, session: &handshake::Session) -> Result<()> {
+    use think_touch::db::subtype_name;
 
         // Fetch result.
-        let resp = session.cmd(chan, &[0x60, 0x00, 0x00, 0x00, 0x00])?;
-        let (s, payload) = split_status(&resp)?;
-        let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
-        if s != 0 || payload.len() < 2 {
-            eprintln!("fetch result failed: {}", fmt_status(s));
-            return Err(Error::PairingMalformed { reason: "fetch result failed" });
+    let resp = session.cmd(chan, &[0x60, 0x00, 0x00, 0x00, 0x00])?;
+    let (s, payload) = split_status(&resp)?;
+    let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
+    if s != 0 || payload.len() < 2 {
+        eprintln!("fetch result failed: {}", fmt_status(s));
+        return Err(Error::PairingMalformed { reason: "fetch result failed" });
+    }
+    let body_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+    let body = &payload[2..2 + body_len.min(payload.len() - 2)];
+    let mut p = body;
+    let mut user_id: Option<u32> = None;
+    let mut subtype: Option<u16> = None;
+    while p.len() >= 4 {
+        let tag = u16::from_le_bytes([p[0], p[1]]);
+        let l = u16::from_le_bytes([p[2], p[3]]) as usize;
+        if 4 + l > p.len() { break; }
+        let val = &p[4..4 + l];
+        match tag {
+            1 if l == 4 => user_id = Some(u32::from_le_bytes(val.try_into().unwrap())),
+            3 if l == 2 => subtype = Some(u16::from_le_bytes(val.try_into().unwrap())),
+            _ => {}
         }
-        let body_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
-        let body = &payload[2..2 + body_len.min(payload.len() - 2)];
-        let mut p = body;
-        let mut user_id: Option<u32> = None;
-        let mut subtype: Option<u16> = None;
-        while p.len() >= 4 {
-            let tag = u16::from_le_bytes([p[0], p[1]]);
-            let l = u16::from_le_bytes([p[2], p[3]]) as usize;
-            if 4 + l > p.len() { break; }
-            let val = &p[4..4 + l];
-            match tag {
-                1 if l == 4 => user_id = Some(u32::from_le_bytes(val.try_into().unwrap())),
-                3 if l == 2 => subtype = Some(u16::from_le_bytes(val.try_into().unwrap())),
-                _ => {}
-            }
-            p = &p[4 + l..];
+        p = &p[4 + l..];
+    }
+    match (user_id, subtype) {
+        (Some(uid), Some(s)) => {
+            let label = subtype_name(s).unwrap_or("(unknown)");
+            println!("MATCH dbid={uid} subtype={s} {label}");
+            Ok(())
         }
-        match (user_id, subtype) {
-            (Some(uid), Some(s)) => {
-                let label = subtype_name(s).unwrap_or("(unknown)");
-                println!("MATCH dbid={uid} subtype={s} {label}");
-                Ok(())
-            }
-            _ => {
-                eprintln!("matcher returned malformed payload: {}", hex(body));
-                Err(Error::PairingMalformed { reason: "malformed match payload" })
-            }
+        _ => {
+            eprintln!("matcher returned malformed payload: {}", hex(body));
+            Err(Error::PairingMalformed { reason: "malformed match payload" })
         }
-    })
+    }
 }
 
 fn int_decode(hex_str: &str) -> Result<()> {
