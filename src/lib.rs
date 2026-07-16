@@ -27,10 +27,9 @@ pub mod usb;
 
 pub use error::{Error, Result};
 pub use protocol::{
-    CMD_GET_PARTITION, CMD_GET_VERSION, CMD_PROBE_19, CMD_READ_FLASH, Channel,
-    FIRMWARE_STALE_SECS, FWEXT_PARTITION, FlashIc, FlashLayout, FlashPartition, FwextState,
-    ModuleInfo, PartitionInfo, RomExtra, RomInfo, STATUS_NO_FW, TLS_FLASH_PARTITION,
-    TlsFlashBlock, parse_flash_info, parse_tls_flash, query_partition, read_flash, send_init,
-    split_status, tls_flash_ids,
+    CMD_GET_PARTITION, CMD_GET_VERSION, CMD_PROBE_19, CMD_READ_FLASH, Channel, FIRMWARE_STALE_SECS,
+    FWEXT_PARTITION, FlashIc, FlashLayout, FlashPartition, FwextState, ModuleInfo, PartitionInfo,
+    RomExtra, RomInfo, STATUS_NO_FW, TLS_FLASH_PARTITION, TlsFlashBlock, parse_flash_info,
+    parse_tls_flash, query_partition, read_flash, send_init, split_status, tls_flash_ids,
 };
 pub use usb::{Sensor, SensorInfo, SupportedDevice};

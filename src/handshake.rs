@@ -110,12 +110,7 @@ fn mac_record(mac_key: &[u8; 32], content_type: u8, body: &[u8]) -> [u8; 32] {
 /// Wrap `payload` for a secure outbound record:
 /// `IV(16) || AES-256-CBC( payload || HMAC )` where HMAC is produced
 /// by [`mac_record`].
-fn protect_record(
-    keys: &SessionKeys,
-    content_type: u8,
-    body: &[u8],
-    iv: &[u8; 16],
-) -> Vec<u8> {
+fn protect_record(keys: &SessionKeys, content_type: u8, body: &[u8], iv: &[u8; 16]) -> Vec<u8> {
     let tag = mac_record(&keys.sign_key, content_type, body);
     let mut signed = Vec::with_capacity(body.len() + 32);
     signed.extend_from_slice(body);
@@ -135,12 +130,8 @@ fn unprotect_record(keys: &SessionKeys, content_type: u8, record_body: &[u8]) ->
         return Err(Error::ShortResponse);
     }
     let iv: [u8; 16] = record_body[..16].try_into().unwrap();
-    let pt = crypto::aes256_cbc_decrypt_validity_pad(
-        &keys.decryption_key,
-        &iv,
-        &record_body[16..],
-    )
-    .ok_or(Error::HandshakeBadRecord)?;
+    let pt = crypto::aes256_cbc_decrypt_validity_pad(&keys.decryption_key, &iv, &record_body[16..])
+        .ok_or(Error::HandshakeBadRecord)?;
     if pt.len() < 32 {
         return Err(Error::HandshakeBadRecord);
     }
@@ -205,7 +196,9 @@ pub struct Session {
 
 impl Session {
     pub fn new(established: Established) -> Self {
-        Self { keys: established.keys }
+        Self {
+            keys: established.keys,
+        }
     }
 
     /// Send `payload` as a TLS application_data record and return the
@@ -226,7 +219,11 @@ impl Session {
         // during the handshake. Sending it post-CCS makes the device
         // parse the leading bytes as bogus command args and reply with
         // a fatal `illegal_parameter` alert.
-        log::debug!("session.cmd outgoing record {} bytes: {}", record.len(), hex_str(&record));
+        log::debug!(
+            "session.cmd outgoing record {} bytes: {}",
+            record.len(),
+            hex_str(&record)
+        );
 
         let resp = chan.cmd(&record)?;
         log::debug!("session.cmd reply {} bytes: {}", resp.len(), hex_str(&resp));
@@ -250,7 +247,9 @@ impl Session {
                     let alert = if pt.len() >= 2 {
                         format!(
                             "level=0x{:02x} desc=0x{:02x} ({})",
-                            pt[0], pt[1], alert_name(pt[1])
+                            pt[0],
+                            pt[1],
+                            alert_name(pt[1])
                         )
                     } else {
                         format!("malformed alert body: {}", hex_str(r.body))
@@ -441,8 +440,7 @@ pub fn run(
         use std::io::Read;
         File::open("/dev/urandom")?.read_exact(&mut iv)?;
     }
-    let encrypted_finished_body =
-        protect_record(&keys, RECORD_HANDSHAKE, &finished_body, &iv);
+    let encrypted_finished_body = protect_record(&keys, RECORD_HANDSHAKE, &finished_body, &iv);
     let finished_record = tls::make_record(RECORD_HANDSHAKE, &encrypted_finished_body);
 
     // Outer record for second flight (cleartext handshake records).
@@ -481,7 +479,11 @@ pub fn run(
         return Err(e);
     }
 
-    Ok(Established { keys, server_random, client_random: cr.0 })
+    Ok(Established {
+        keys,
+        server_random,
+        client_random: cr.0,
+    })
 }
 
 /// Parse the device's response to ClientHello: ServerHello,
@@ -493,7 +495,9 @@ fn parse_server_response(resp: &[u8], transcript: &mut Sha256) -> Result<[u8; 32
     let mut server_random: Option<[u8; 32]> = None;
     for r in &records {
         if r.content_type != RECORD_HANDSHAKE {
-            return Err(Error::HandshakeUnexpected { hint: "non-handshake record before keys derived" });
+            return Err(Error::HandshakeUnexpected {
+                hint: "non-handshake record before keys derived",
+            });
         }
         let mut p = r.body;
         while !p.is_empty() {
@@ -527,7 +531,9 @@ fn parse_server_response(resp: &[u8], transcript: &mut Sha256) -> Result<[u8; 32
             p = &p[4 + l..];
         }
     }
-    server_random.ok_or(Error::HandshakeUnexpected { hint: "no ServerHello" })
+    server_random.ok_or(Error::HandshakeUnexpected {
+        hint: "no ServerHello",
+    })
 }
 
 fn parse_server_hello(body: &[u8]) -> Result<[u8; 32]> {
@@ -535,7 +541,9 @@ fn parse_server_hello(body: &[u8]) -> Result<[u8; 32]> {
         return Err(Error::ShortResponse);
     }
     if body[0] != 0x03 || body[1] != 0x03 {
-        return Err(Error::HandshakeUnexpected { hint: "ServerHello version != 3.3" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "ServerHello version != 3.3",
+        });
     }
     let mut sr = [0u8; 32];
     sr.copy_from_slice(&body[2..34]);
@@ -546,10 +554,14 @@ fn parse_server_hello(body: &[u8]) -> Result<[u8; 32]> {
     }
     let suite = u16::from_be_bytes([body[after_sid], body[after_sid + 1]]);
     if suite != tls::SUITE_ECDH_ECDSA_AES256_CBC_SHA {
-        return Err(Error::HandshakeUnexpected { hint: "ServerHello selected an unexpected suite" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "ServerHello selected an unexpected suite",
+        });
     }
     if body[after_sid + 2] != 0 {
-        return Err(Error::HandshakeUnexpected { hint: "compression must be 0" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "compression must be 0",
+        });
     }
     Ok(sr)
 }
@@ -561,10 +573,14 @@ fn parse_cert_req(body: &[u8]) -> Result<()> {
     let algo = u16::from_be_bytes([body[0], body[1]]);
     let ca_len = u16::from_be_bytes([body[2], body[3]]) as usize;
     if algo != 0x0140 {
-        return Err(Error::HandshakeUnexpected { hint: "unexpected cert-req sign+hash algo" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "unexpected cert-req sign+hash algo",
+        });
     }
     if ca_len != 0 {
-        return Err(Error::HandshakeUnexpected { hint: "non-empty CA list in CertReq" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "non-empty CA list in CertReq",
+        });
     }
     Ok(())
 }
@@ -585,7 +601,9 @@ fn parse_finished(
         match r.content_type {
             RECORD_CHANGE_CIPHER_SPEC => {
                 if r.body != [0x01] {
-                    return Err(Error::HandshakeUnexpected { hint: "bad CCS payload" });
+                    return Err(Error::HandshakeUnexpected {
+                        hint: "bad CCS payload",
+                    });
                 }
                 got_ccs = true;
             }
@@ -619,12 +637,16 @@ fn parse_finished(
                 got_fin = true;
             }
             _ => {
-                return Err(Error::HandshakeUnexpected { hint: "unexpected record type" });
+                return Err(Error::HandshakeUnexpected {
+                    hint: "unexpected record type",
+                });
             }
         }
     }
     if !(got_ccs && got_fin) {
-        return Err(Error::HandshakeUnexpected { hint: "missing CCS or Finished from server" });
+        return Err(Error::HandshakeUnexpected {
+            hint: "missing CCS or Finished from server",
+        });
     }
     Ok(())
 }

@@ -22,7 +22,8 @@ pub struct HostId {
 
 impl HostId {
     pub fn read() -> Self {
-        let product_name = read_dmi("/sys/class/dmi/id/product_name").unwrap_or_else(|| "VirtualBox".into());
+        let product_name =
+            read_dmi("/sys/class/dmi/id/product_name").unwrap_or_else(|| "VirtualBox".into());
         let product_serial = read_dmi("/sys/class/dmi/id/product_serial").unwrap_or_else(|| {
             // /sys/class/dmi/id/product_serial is mode 0400 root-only on
             // most distros for security. If we can't read it, the
@@ -48,7 +49,10 @@ impl HostId {
             );
             "0".into()
         });
-        Self { product_name, product_serial }
+        Self {
+            product_name,
+            product_serial,
+        }
     }
 }
 
@@ -64,7 +68,10 @@ mod tests {
 
     #[test]
     fn read_dmi_returns_trimmed_contents() {
-        let path = std::env::temp_dir().join(format!("synaptics-metallica-mis-dmi-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-dmi-{}",
+            std::process::id()
+        ));
         let mut f = fs::File::create(&path).unwrap();
         // Real /sys/class/dmi/id files always carry a trailing newline.
         writeln!(f, "20QRCTO1WW").unwrap();
@@ -82,8 +89,10 @@ mod tests {
     /// must read as an empty trimmed string, not `None`.
     #[test]
     fn read_dmi_empty_file_is_empty_string() {
-        let path =
-            std::env::temp_dir().join(format!("synaptics-metallica-mis-dmi-empty-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-dmi-empty-{}",
+            std::process::id()
+        ));
         fs::write(&path, "").unwrap();
         let v = read_dmi(path.to_str().unwrap()).unwrap();
         assert_eq!(v, "");

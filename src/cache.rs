@@ -130,8 +130,14 @@ impl PairingCache {
             .open(path)?;
         writeln!(f, "{MAGIC}")?;
         writeln!(f, "# Pairing cache for the Synaptics Metallica MIS sensor.")?;
-        writeln!(f, "# This file contains the host's TLS-signing PRIVATE KEY.")?;
-        writeln!(f, "# Treat it like ~/.ssh/id_ed25519 — keep it 0600 and root-only.")?;
+        writeln!(
+            f,
+            "# This file contains the host's TLS-signing PRIVATE KEY."
+        )?;
+        writeln!(
+            f,
+            "# Treat it like ~/.ssh/id_ed25519 — keep it 0600 and root-only."
+        )?;
         writeln!(f, "device_name={}", self.product_name)?;
         writeln!(f, "device_serial={}", self.product_serial)?;
         writeln!(f, "tls_cert={}", hex(&self.tls_cert))?;
@@ -165,7 +171,10 @@ impl PairingCache {
 }
 
 fn missing(field: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("cache missing field: {field}"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("cache missing field: {field}"),
+    )
 }
 
 fn io_err(e: &'static str) -> io::Error {
@@ -194,7 +203,9 @@ fn unhex(s: &str) -> Result<Vec<u8>, &'static str> {
 
 fn unhex_array<const N: usize>(s: &str) -> Result<[u8; N], &'static str> {
     let v = unhex(s)?;
-    v.as_slice().try_into().map_err(|_| "wrong byte length for fixed-size field")
+    v.as_slice()
+        .try_into()
+        .map_err(|_| "wrong byte length for fixed-size field")
 }
 
 #[cfg(test)]
@@ -207,15 +218,25 @@ mod tests {
             product_name: "20QRCTO1WW".to_string(),
             product_serial: "PF1YZ4SV".to_string(),
             tls_cert: vec![0x17, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0xc1, 0x17],
-            priv_key: PrivKey { x: [0x11; 32], y: [0x22; 32], d: [0x33; 32] },
-            ecdh_q: EcdhQ { x: [0x44; 32], y: [0x55; 32] },
+            priv_key: PrivKey {
+                x: [0x11; 32],
+                y: [0x22; 32],
+                d: [0x33; 32],
+            },
+            ecdh_q: EcdhQ {
+                x: [0x44; 32],
+                y: [0x55; 32],
+            },
         }
     }
 
     #[test]
     fn roundtrip_via_temp_file() {
         let dir = std::env::temp_dir();
-        let path: PathBuf = dir.join(format!("synaptics-metallica-mis-test-{}", std::process::id()));
+        let path: PathBuf = dir.join(format!(
+            "synaptics-metallica-mis-test-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
 
         let original = fixture();
@@ -239,7 +260,10 @@ mod tests {
     #[test]
     fn missing_magic_rejected() {
         let dir = std::env::temp_dir();
-        let path: PathBuf = dir.join(format!("synaptics-metallica-mis-test-nomagic-{}", std::process::id()));
+        let path: PathBuf = dir.join(format!(
+            "synaptics-metallica-mis-test-nomagic-{}",
+            std::process::id()
+        ));
         fs::write(&path, "device_name=foo\ndevice_serial=bar\n").unwrap();
         assert!(PairingCache::load(&path).is_err());
         let _ = fs::remove_file(&path);
@@ -255,14 +279,18 @@ mod tests {
 
     #[test]
     fn calib_data_round_trip() {
-        let path: PathBuf =
-            std::env::temp_dir().join(format!("synaptics-metallica-mis-calib-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-calib-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
         let data: Vec<u8> = (0..1024).map(|i| (i & 0xff) as u8).collect();
         save_calib_data(&path, &data).unwrap();
         let back = load_calib_data(&path).unwrap();
         assert_eq!(back, data);
-        let mode = std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&path).unwrap().permissions()) & 0o777;
+        let mode =
+            std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&path).unwrap().permissions())
+                & 0o777;
         assert_eq!(mode, 0o600);
         let _ = fs::remove_file(&path);
     }
@@ -278,8 +306,10 @@ mod tests {
     /// future fields written by a newer synaptics-metallica-mis version).
     #[test]
     fn unknown_keys_are_ignored() {
-        let path: PathBuf = std::env::temp_dir()
-            .join(format!("synaptics-metallica-mis-test-unknown-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-test-unknown-{}",
+            std::process::id()
+        ));
         let zero64 = "0".repeat(64);
         let cert = "abcd";
         let body = format!(
@@ -306,12 +336,16 @@ mod tests {
     /// Missing required fields error rather than producing garbage.
     #[test]
     fn missing_required_fields_error() {
-        let path: PathBuf = std::env::temp_dir()
-            .join(format!("synaptics-metallica-mis-test-missing-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-test-missing-{}",
+            std::process::id()
+        ));
         // Only magic + name — every other required field absent.
         fs::write(&path, format!("{MAGIC}\ndevice_name=Foo\n")).unwrap();
         let err = PairingCache::load(&path).unwrap_err();
-        assert!(err.to_string().contains("device_serial") || err.kind() == io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string().contains("device_serial") || err.kind() == io::ErrorKind::InvalidData
+        );
         let _ = fs::remove_file(&path);
     }
 
@@ -319,8 +353,10 @@ mod tests {
     /// than panic. priv_x is 32 bytes (64 hex chars).
     #[test]
     fn wrong_length_hex_errors() {
-        let path: PathBuf =
-            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-wrongsz-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-test-wrongsz-{}",
+            std::process::id()
+        ));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\
@@ -341,8 +377,10 @@ mod tests {
     /// Odd-length hex must be rejected (each byte = 2 nibbles).
     #[test]
     fn odd_length_hex_errors() {
-        let path: PathBuf =
-            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-odd-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-test-odd-{}",
+            std::process::id()
+        ));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\
@@ -364,8 +402,10 @@ mod tests {
     /// through verbatim (we trim line ends but not field bodies).
     #[test]
     fn empty_device_name_value() {
-        let path: PathBuf =
-            std::env::temp_dir().join(format!("synaptics-metallica-mis-test-empty-{}", std::process::id()));
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "synaptics-metallica-mis-test-empty-{}",
+            std::process::id()
+        ));
         let zero64 = "0".repeat(64);
         let body = format!(
             "{MAGIC}\n\

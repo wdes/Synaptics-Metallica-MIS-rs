@@ -52,7 +52,9 @@ pub fn decrypt_priv(body: &[u8], keys: &GwkKeys) -> Result<PrivKey> {
     }
     let prefix = body[0];
     if prefix != 0x02 {
-        return Err(Error::PairingMalformed { reason: "priv key prefix is not 0x02" });
+        return Err(Error::PairingMalformed {
+            reason: "priv key prefix is not 0x02",
+        });
     }
     let inner = &body[1..];
     if inner.len() < 16 + 32 {
@@ -69,10 +71,15 @@ pub fn decrypt_priv(body: &[u8], keys: &GwkKeys) -> Result<PrivKey> {
     // Decrypt AES-256-CBC with psk_encryption_key.
     let iv: [u8; 16] = signed_part[..16].try_into().unwrap();
     let ct = &signed_part[16..];
-    let pt = crypto::aes256_cbc_decrypt(&keys.psk_encryption_key, &iv, ct)
-        .ok_or(Error::PairingMalformed { reason: "AES-CBC decryption / padding failed" })?;
+    let pt = crypto::aes256_cbc_decrypt(&keys.psk_encryption_key, &iv, ct).ok_or(
+        Error::PairingMalformed {
+            reason: "AES-CBC decryption / padding failed",
+        },
+    )?;
     if pt.len() < 96 {
-        return Err(Error::PairingMalformed { reason: "decrypted priv-key plaintext too short" });
+        return Err(Error::PairingMalformed {
+            reason: "decrypted priv-key plaintext too short",
+        });
     }
 
     // Plaintext layout: x[32] || y[32] || d[32], each little-endian on
@@ -183,7 +190,10 @@ mod tests {
         let mut body = synth_priv_block(&keys, &[1; 32], &[2; 32], &[3; 32], &[0xCD; 16]);
         let last = body.len() - 1;
         body[last] ^= 0x01;
-        assert!(matches!(decrypt_priv(&body, &keys), Err(Error::PairingHmac)));
+        assert!(matches!(
+            decrypt_priv(&body, &keys),
+            Err(Error::PairingHmac)
+        ));
     }
 
     /// Mid-ciphertext flip must also fail HMAC (signed_part covers the
@@ -195,7 +205,10 @@ mod tests {
         // Flip a bit in the middle of the ciphertext (after the prefix
         // and IV, before the trailing HMAC tag).
         body[40] ^= 0x80;
-        assert!(matches!(decrypt_priv(&body, &keys), Err(Error::PairingHmac)));
+        assert!(matches!(
+            decrypt_priv(&body, &keys),
+            Err(Error::PairingHmac)
+        ));
     }
 
     /// Wrong prefix byte signals a different format — we don't try to
@@ -205,16 +218,25 @@ mod tests {
         let keys = fixture_keys();
         let mut body = synth_priv_block(&keys, &[1; 32], &[2; 32], &[3; 32], &[0xEE; 16]);
         body[0] = 0x03;
-        assert!(matches!(decrypt_priv(&body, &keys), Err(Error::PairingMalformed { .. })));
+        assert!(matches!(
+            decrypt_priv(&body, &keys),
+            Err(Error::PairingMalformed { .. })
+        ));
     }
 
     /// Empty input → `ShortResponse`, not a panic.
     #[test]
     fn decrypt_priv_short_input_errors() {
         let keys = fixture_keys();
-        assert!(matches!(decrypt_priv(&[], &keys), Err(Error::ShortResponse)));
+        assert!(matches!(
+            decrypt_priv(&[], &keys),
+            Err(Error::ShortResponse)
+        ));
         // 0x02 prefix + truncated content too short to even hold the IV+HMAC.
-        assert!(matches!(decrypt_priv(&[0x02, 0, 0], &keys), Err(Error::ShortResponse)));
+        assert!(matches!(
+            decrypt_priv(&[0x02, 0, 0], &keys),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// `parse_ecdh` must read the LE coords at offsets 0x08 and 0x4c
@@ -274,6 +296,9 @@ mod tests {
 
     #[test]
     fn parse_ecdh_short_input_errors() {
-        assert!(matches!(parse_ecdh(&[0u8; 0x10]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            parse_ecdh(&[0u8; 0x10]),
+            Err(Error::ShortResponse)
+        ));
     }
 }
