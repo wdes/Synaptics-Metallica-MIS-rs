@@ -52,7 +52,11 @@ pub const FM_3367_001: SensorTypeInfo = SensorTypeInfo {
 /// Lookup by `sensor_type` field. Currently only the user's device is
 /// implemented; returns `None` for unknown hardware.
 pub fn by_type(sensor_type: u16) -> Option<&'static SensorTypeInfo> {
-    if sensor_type == FM_3367_001.sensor_type { Some(&FM_3367_001) } else { None }
+    if sensor_type == FM_3367_001.sensor_type {
+        Some(&FM_3367_001)
+    } else {
+        None
+    }
 }
 
 /// Concatenated `SensorCaptureProg` blobs (b1 + b2) for the entry
@@ -123,7 +127,11 @@ mod tests {
         let cal = FM_3367_001.calibration_blob;
         assert_eq!(cal.len(), FM_3367_001.lines_per_calibration_data as usize);
         for w in cal.windows(2) {
-            assert!(w[0] >= w[1], "calibration curve must be decreasing: {:?}", &w);
+            assert!(
+                w[0] >= w[1],
+                "calibration curve must be decreasing: {:?}",
+                w
+            );
         }
         assert_eq!(cal[0], 0x9b);
         assert_eq!(*cal.last().unwrap(), 0x06);
@@ -151,7 +159,11 @@ mod tests {
         let chunks = crate::chunks::split(&FM_3367_001_PROG).unwrap();
         // Upstream's program for our device produces a non-trivial
         // number of chunks — sanity floor.
-        assert!(chunks.len() >= 8, "expected >=8 chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 8,
+            "expected >=8 chunks, got {}",
+            chunks.len()
+        );
         // Re-merging should be byte-identical (round-trip).
         let merged = crate::chunks::merge(&chunks);
         assert_eq!(merged, FM_3367_001_PROG);
@@ -164,11 +176,17 @@ mod tests {
     fn fm_3367_prog_contains_timeslot_table() {
         let chunks = crate::chunks::split(&FM_3367_001_PROG).unwrap();
         let timeslot = chunks.iter().find(|c| c.kind == 0x0034);
-        assert!(timeslot.is_some(), "expected a 0x34 Timeslot Table 2D chunk");
+        assert!(
+            timeslot.is_some(),
+            "expected a 0x34 Timeslot Table 2D chunk"
+        );
         // The body must be at least line_width bytes — the second pass
         // through it slices `tst[line_width..]`.
         let body = &timeslot.unwrap().body;
-        assert!(body.len() >= FM_3367_001.line_width as usize, "body shorter than line_width");
+        assert!(
+            body.len() >= FM_3367_001.line_width as usize,
+            "body shorter than line_width"
+        );
     }
 
     /// Locked first chunks in upstream's program — these map to
@@ -179,8 +197,14 @@ mod tests {
         let chunks = crate::chunks::split(&FM_3367_001_PROG).unwrap();
         assert_eq!(chunks[0].kind, 0x0023, "first chunk = 0x23 setup record");
         assert_eq!(chunks[0].body.len(), 0);
-        assert_eq!(chunks[1].kind, 0x0020, "second chunk = 0x20 Set Register 32");
+        assert_eq!(
+            chunks[1].kind, 0x0020,
+            "second chunk = 0x20 Set Register 32"
+        );
         assert_eq!(chunks[1].body.len(), 8);
-        assert_eq!(chunks[2].kind, 0x0032, "third chunk = 0x32 Set Registers 16");
+        assert_eq!(
+            chunks[2].kind, 0x0032,
+            "third chunk = 0x32 Set Registers 16"
+        );
     }
 }

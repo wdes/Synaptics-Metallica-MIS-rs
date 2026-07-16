@@ -40,7 +40,10 @@ pub const SUPPORTED: &[SupportedDevice] = &[
 ];
 
 pub fn lookup(vid: u16, pid: u16) -> Option<SupportedDevice> {
-    SUPPORTED.iter().copied().find(|d| d.vid == vid && d.pid == pid)
+    SUPPORTED
+        .iter()
+        .copied()
+        .find(|d| d.vid == vid && d.pid == pid)
 }
 
 #[derive(Debug)]
@@ -58,7 +61,11 @@ impl fmt::Display for SensorInfo {
         write!(
             f,
             "{:04x}:{:04x} ({}) — bus {:03} device {:03}",
-            self.device.vid, self.device.pid, self.device.codename, self.bus_number, self.device_address,
+            self.device.vid,
+            self.device.pid,
+            self.device.codename,
+            self.bus_number,
+            self.device_address,
         )?;
         if let Some(p) = &self.product {
             write!(f, " — {p}")?;

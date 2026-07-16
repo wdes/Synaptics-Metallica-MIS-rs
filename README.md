@@ -3,15 +3,16 @@
 > CLI command: `synaptics-metallica-mis` — library crate: `think_touch` — package: `synaptics-metallica-mis-rs`
 
 A pure-Rust userspace driver for the Synaptics / Validity **Metallica MIS**
-fingerprint sensor (USB id `06cb:009a`) found on the ThinkPad P70 and a
-handful of other Lenovo laptops from that era.
+fingerprint sensor (USB id `06cb:009a`) found on Lenovo laptops including
+the ThinkPad P70 and ThinkPad T480s.
 
-> **Status: working end-to-end.** Pairing, calibration, capture, and
-> matching against an enrolled finger all run on real hardware.
-> Enrollment write path is wired (verified byte-for-byte against
-> python-validity) but the resilient retry loop is still being tuned.
+> **Status: working end-to-end.** Pairing, three-pass calibration,
+> capture, enrollment, database writes, and fingerprint matching all run
+> on real hardware. Enrollment and matching have been validated on a
+> ThinkPad T480s with the FM-3367-001 sensor (`06cb:009a`, sensor type
+> `0x0199`).
 >
-> 209 unit tests, lint-clean under `-D warnings`, MPL-2.0.
+> 213 unit tests, lint-clean under `-D warnings`, MPL-2.0.
 
 ```
 ┌──────────────────── Synaptics-Metallica-MIS-rs ─────────────────────┐
@@ -40,7 +41,7 @@ non-`fprintd` workflows, and the runtime story (system-wide Python +
 
 | VID    | PID    | Codename       | Notes                                       |
 |--------|--------|----------------|---------------------------------------------|
-| `06cb` | `009a` | Metallica MIS  | ThinkPad P70 / T480 / X1 C6 — primary target |
+| `06cb` | `009a` | Metallica MIS  | Validated on ThinkPad P70 and T480s — primary target |
 | `138a` | `0090` | Prometheus     | Recognised, not yet driven                  |
 | `138a` | `0097` | Prometheus 97  | Recognised, not yet driven                  |
 | `138a` | `009d` | Prometheus 9d  | Recognised, not yet driven                  |
@@ -57,17 +58,25 @@ sudo ./target/release/synaptics-metallica-mis list
 # Run the full read-only health-check (no flash writes)
 sudo ./target/release/synaptics-metallica-mis diagnose
 
-# Capture + match an enrolled finger
-sudo ./target/release/synaptics-metallica-mis save-calib            # 3-pass calibration, ~1 sec
-sudo ./target/release/synaptics-metallica-mis try-identify --use-saved-calib
-# Press your enrolled finger when prompted. You should see:
+# Generate and save the three-pass calibration baseline
+sudo ./target/release/synaptics-metallica-mis save-calib
+
+# Match an enrolled finger
+sudo ./target/release/synaptics-metallica-mis match-finger --retries 5
+# Press an enrolled finger when prompted. A successful result looks like:
 #
-#   ┌── MATCH ───────────────────────────────────────────┐
-#   │  user dbid : 5                                     │
-#   │  finger    : 1 (right-thumb)                       │
-#   │  hash[..8] : 322987beb350cefa…                     │
-#   └────────────────────────────────────────────────────┘
+#   MATCH dbid=9 subtype=2 right-index-finger
+
+# Enroll a finger; subtype 4 is the right ring finger
+sudo ./target/release/synaptics-metallica-mis enroll \
+    --subtype 4 \
+    --sid-string S-1-5-21-0-0-0-1000 \
+    --yes
 ```
+
+The SID identifies the user record stored on the sensor. Use a stable
+SID for the same Linux account across subsequent enrollments. The value
+above is an example.
 
 ## How it all fits together
 
@@ -98,7 +107,7 @@ The driver is a stack of independently-testable layers:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Each layer has its own regression tests (totalling 209) so a change at
+Each layer has its own regression tests (totalling 213) so a change at
 the byte level shows up immediately.
 
 ## Talking to the sensor
@@ -128,7 +137,7 @@ A typical IDENTIFY round-trip looks like this:
 ```
     host                                       device
     │                                              │
-    │── cmd 0x02 IDENTIFY (13 729 B) ─────────────►│
+    │── cmd 0x02 IDENTIFY (13 741 B) ─────────────►│
     │                                              │
     │◄────────────────────  EP 0x83: 0000000000  ──│  matcher armed
     │                                              │
@@ -209,15 +218,19 @@ becomes session-encrypted.
 ## Calibration and the cmd-02 program
 
 The hardest part of bringing this sensor up wasn't TLS — it was the
-13 729-byte program we have to ship with every IDENTIFY/ENROLL.
+13 741-byte program we have to ship with every IDENTIFY/ENROLL.
 
 The capture command (`cmd 0x02`) carries a stream of TLV chunks that
 the device interprets as a tiny sensor program: which scan-line
-schedule to run, where to put pixels, which transforms to apply. For
-calibration we send a small program (657 bytes) and read back raw
-pixels on EP 0x82. For identify/enroll we have to bake the calibration
-data *into* the program as per-line offsets — without those, the
-matcher reads sensor noise and fires a phantom-touch sentinel.
+schedule to run, where to put pixels, which transforms to apply.
+
+Calibration is iterative. The first pass sends an 897-byte program.
+Passes two and three feed the accumulated 13 440-byte calibration
+result back into the device and therefore send 13 665-byte packets.
+IDENTIFY and ENROLL then embed that calibration data in a 13 741-byte
+`cmd 0x02` packet. Without the feedback passes and embedded per-line
+offsets, the matcher reads sensor noise and rejects otherwise valid
+fingerprints.
 
 ```
             ┌────── cmd 0x02 IDENTIFY (16 chunks, 13 729 B) ──────┐
@@ -259,7 +272,7 @@ on-wire output (`scripts/captured/pv_cmd02_*.hex`).
 └── calib_data               last-saved calibration baseline (mode 0600)
                              13 440 bytes; 112 lines × 120 bytes/line
                              produced by `save-calib`; reused by
-                             `try-identify --use-saved-calib`
+                             `match-finger` and enrollment
 ```
 
 Both files live under `/var/lib` because they're host-state, not
@@ -282,24 +295,40 @@ The Metallica MIS has a small NOR flash split into 5 partitions:
 └──────┴──────────┴───────────────────────────────────────────────┘
 ```
 
-On Lenovo P70s shipped with Windows, partitions 1, 2, and 6 are
-already populated by the Synaptics OEM driver. We *read* all of them
-during a normal synaptics-metallica-mis session; we only *write* to partition 4
-during enrollment.
+On supported Lenovo systems previously initialised by the Synaptics
+OEM driver or `python-validity`, partitions 1, 2, and 6 are already
+populated. We *read* them during a normal
+`synaptics-metallica-mis` session; enrollment writes fingerprint
+records to partition 4.
 
 ### On host hardware
 
-```
-/sys/class/dmi/id/product_name      "20QRCTO1WW"  on the user's P70
-/sys/class/dmi/id/product_serial    "PF1YZ4SV"
+The pairing record is tied to the host identity exposed through:
 
-  → fed into the GWK key derivation. Without these the host can't
-    decrypt the pairing record.
+```
+/sys/class/dmi/id/product_name
+/sys/class/dmi/id/product_serial
 ```
 
-Currently we read these directly which requires `sudo`. A future
-`setcap CAP_DAC_READ_SEARCH` step will let an unprivileged user run
-the binary.
+These values feed the GWK key derivation. Without the matching host
+identity, the driver cannot decrypt the pairing record. The installer
+grants `CAP_DAC_READ_SEARCH` so the installed binary can read the
+protected DMI serial without running the whole process as root.
+
+## ThinkPad T480s validation
+
+The ThinkPad T480s implementation was validated on the FM-3367-001
+sensor (`06cb:009a`, sensor type `0x0199`). The tested workflow covers:
+
+* three-pass calibration with packet sizes 897 / 13 665 / 13 665 bytes;
+* saving and reloading the 13 440-byte calibration baseline;
+* enrolling a new fingerprint;
+* matching existing and newly enrolled fingerprints;
+* matching after a USB reset;
+* retrying low-quality captures without leaving the sensor stuck.
+
+This resolves the enrollment stall reported in
+[issue #1](https://github.com/wdes/Synaptics-Metallica-MIS-rs/issues/1).
 
 ## Command reference
 
@@ -342,7 +371,7 @@ synaptics-metallica-mis save-calib                                     # 3-pass 
 synaptics-metallica-mis try-calibrate [--save-pgm out.pgm]             # one CALIBRATE pass; optionally PGM-render
 synaptics-metallica-mis try-identify [--use-saved-calib | --use-stored-calib]
                                                            # full identify + match flow with verbose trace
-synaptics-metallica-mis match-finger                                   # one-shot identify+match; stdout: "MATCH dbid=N subtype=M …"
+synaptics-metallica-mis match-finger [--retries N]                     # identify+match; stdout: "MATCH dbid=N subtype=M …"
                                                            # exit 0 = match, non-zero = no-match / low-quality / error
 synaptics-metallica-mis enroll --subtype 1 [--sid-string S-...] --yes  # write a fingerprint (destructive, auto-retries on quality errors)
 synaptics-metallica-mis delete-record <dbid> --yes                     # remove a user or finger record (cmd 0x48, cascades for users)
@@ -497,8 +526,8 @@ sudo rm -rf /var/lib/synaptics-metallica-mis
 ## Testing
 
 ```sh
-cargo test                                 # 209 unit tests
-cargo clippy --all-targets -- -D warnings  # lint
+cargo test                                              # 213 unit tests
+cargo clippy --all-targets --all-features -- -D warnings  # lint
 ```
 
 Several tests are byte-exact regression vectors against python-validity

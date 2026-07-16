@@ -325,7 +325,6 @@ pub const DB_WRITE_ENABLE_9A: [u8; 3621] = [
     0x65, 0x99, 0xbb, 0x0a, 0x60,
 ];
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

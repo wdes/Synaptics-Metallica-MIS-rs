@@ -98,7 +98,9 @@ pub fn aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8]) -> Option<Ve
     }
     let mut buf = ct.to_vec();
     let dec = Aes256CbcDec::new(key.into(), iv.into());
-    dec.decrypt_padded_mut::<Pkcs7>(&mut buf).ok().map(|pt| pt.to_vec())
+    dec.decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .ok()
+        .map(|pt| pt.to_vec())
 }
 
 /// AES-256-CBC encrypt with PKCS7 padding. The IV must be 16 bytes;
@@ -205,8 +207,18 @@ impl Ephemeral {
                 continue;
             };
             let pub_pt = secret.public_key().to_encoded_point(false);
-            let x: [u8; 32] = pub_pt.x().expect("uncompressed").as_slice().try_into().unwrap();
-            let y: [u8; 32] = pub_pt.y().expect("uncompressed").as_slice().try_into().unwrap();
+            let x: [u8; 32] = pub_pt
+                .x()
+                .expect("uncompressed")
+                .as_slice()
+                .try_into()
+                .unwrap();
+            let y: [u8; 32] = pub_pt
+                .y()
+                .expect("uncompressed")
+                .as_slice()
+                .try_into()
+                .unwrap();
             return Ok(Self { secret, x, y });
         }
     }
@@ -329,25 +341,21 @@ mod tests {
 
     fn unhex(s: &str) -> Vec<u8> {
         let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     /// Test vector from RFC 5903 §8.1 (P-256 ECDH worked example).
     /// Validates that `p256_ecdh` returns the correct shared X coordinate.
     #[test]
     fn p256_ecdh_rfc5903_vector() {
-        let i_d = unhex(
-            "C88F01F5 10D9AC3F 70A292DA A2316DE5 44E9AAB8 AFE84049 C62A9C57 862D1433",
-        );
-        let r_x = unhex(
-            "D12DFB52 89C8D4F8 1208B702 70398C34 2296970A 0BCCB74C 736FC755 4494BF63",
-        );
-        let r_y = unhex(
-            "56FBF3CA 366CC23E 8157854C 13C58D6A AC23F046 ADA30F83 53E74F33 039872AB",
-        );
-        let expected_z = unhex(
-            "D6840F6B 42F6EDAF D13116E0 E1256520 2FEF8E9E CE7DCE03 812464D0 4B9442DE",
-        );
+        let i_d = unhex("C88F01F5 10D9AC3F 70A292DA A2316DE5 44E9AAB8 AFE84049 C62A9C57 862D1433");
+        let r_x = unhex("D12DFB52 89C8D4F8 1208B702 70398C34 2296970A 0BCCB74C 736FC755 4494BF63");
+        let r_y = unhex("56FBF3CA 366CC23E 8157854C 13C58D6A AC23F046 ADA30F83 53E74F33 039872AB");
+        let expected_z =
+            unhex("D6840F6B 42F6EDAF D13116E0 E1256520 2FEF8E9E CE7DCE03 812464D0 4B9442DE");
 
         let mut d = [0u8; 32];
         d.copy_from_slice(&i_d);
@@ -375,8 +383,8 @@ mod tests {
         for len in [0usize, 1, 15, 16, 17, 31, 32, 47, 48, 100] {
             let pt: Vec<u8> = (0..len).map(|i| i as u8).collect();
             let ct = aes256_cbc_encrypt_validity_pad(&key, &iv, &pt);
-            let back = aes256_cbc_decrypt_validity_pad(&key, &iv, &ct)
-                .expect("decrypt must succeed");
+            let back =
+                aes256_cbc_decrypt_validity_pad(&key, &iv, &ct).expect("decrypt must succeed");
             assert_eq!(back, pt, "roundtrip mismatch at len={len}");
         }
     }
@@ -389,7 +397,11 @@ mod tests {
         let iv = [0x44; 16];
         let pt = [0xAA; 16];
         let ct = aes256_cbc_encrypt_validity_pad(&key, &iv, &pt);
-        assert_eq!(ct.len(), 32, "16-byte input must produce a 32-byte ciphertext");
+        assert_eq!(
+            ct.len(),
+            32,
+            "16-byte input must produce a 32-byte ciphertext"
+        );
         let back = aes256_cbc_decrypt_validity_pad(&key, &iv, &ct).unwrap();
         assert_eq!(back, &pt[..]);
     }
@@ -416,9 +428,7 @@ mod tests {
     fn hmac_sha256_rfc4231_case1() {
         let key = [0x0b; 20];
         let data = b"Hi There";
-        let expected = unhex(
-            "b0344c61d8db38535ca8afceaf0bf12b 881dc200c9833da726e9376c2e32cff7",
-        );
+        let expected = unhex("b0344c61d8db38535ca8afceaf0bf12b 881dc200c9833da726e9376c2e32cff7");
         assert_eq!(hmac_sha256(&key, data).to_vec(), expected);
     }
 
@@ -427,9 +437,7 @@ mod tests {
     fn hmac_sha256_rfc4231_case2() {
         let key = b"Jefe";
         let data = b"what do ya want for nothing?";
-        let expected = unhex(
-            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
-        );
+        let expected = unhex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         assert_eq!(hmac_sha256(key, data).to_vec(), expected);
     }
 

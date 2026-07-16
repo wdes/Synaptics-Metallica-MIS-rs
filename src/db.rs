@@ -164,7 +164,11 @@ pub fn parse_user(payload: &[u8]) -> Result<User> {
     }
     let id_off = 8 + finger_cnt * 8;
     let identity = payload[id_off..id_off + identity_size].to_vec();
-    Ok(User { dbid, identity, fingers })
+    Ok(User {
+        dbid,
+        identity,
+        fingers,
+    })
 }
 
 /// `parse_identity` — strip the 8-byte identity-type header and return
@@ -177,7 +181,9 @@ pub fn parse_identity(identity: &[u8]) -> Result<&[u8]> {
     }
     let typ = u32::from_le_bytes(identity[0..4].try_into().unwrap());
     if typ != 3 {
-        return Err(Error::PairingMalformed { reason: "unknown identity type (expected 3)" });
+        return Err(Error::PairingMalformed {
+            reason: "unknown identity type (expected 3)",
+        });
     }
     let len = u32::from_le_bytes(identity[4..8].try_into().unwrap()) as usize;
     if identity.len() < 8 + len {
@@ -237,7 +243,11 @@ impl SidIdentity {
             let off = 8 + i * 4;
             subauth.push(u32::from_le_bytes(b[off..off + 4].try_into().unwrap()));
         }
-        Ok(Self { revision, auth, subauth })
+        Ok(Self {
+            revision,
+            auth,
+            subauth,
+        })
     }
 }
 
@@ -393,7 +403,10 @@ mod tests {
         assert_eq!(u.fingers[0].subtype, 1);
         assert_eq!(subtype_name(u.fingers[0].subtype), Some("right-thumb"));
         assert_eq!(u.fingers[1].subtype, 7);
-        assert_eq!(subtype_name(u.fingers[1].subtype), Some("left-index-finger"));
+        assert_eq!(
+            subtype_name(u.fingers[1].subtype),
+            Some("left-index-finger")
+        );
         assert_eq!(u.identity, vec![0x42; 8]);
     }
 
@@ -434,7 +447,10 @@ mod tests {
 
     #[test]
     fn parse_user_storage_short_payload_errors() {
-        assert!(matches!(parse_user_storage(&[0u8; 4]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            parse_user_storage(&[0u8; 4]),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// Round-trip a synthetic Windows SID through `to_bytes`/`from_bytes`
@@ -450,17 +466,27 @@ mod tests {
         // 8 bytes header + 5 × 4 = 28 bytes
         assert_eq!(bytes.len(), 28);
         // First 8 bytes: rev=1, count=5, auth_high (BE u16) = 0, auth_low (BE u32) = 5
-        assert_eq!(&bytes[..8], &[0x01, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05]);
+        assert_eq!(
+            &bytes[..8],
+            &[0x01, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05]
+        );
         let back = SidIdentity::from_bytes(&bytes).unwrap();
         assert_eq!(back, sid);
-        assert_eq!(format!("{sid}"), "S-1-5-21-1234567890-987654321-1122334455-1001");
+        assert_eq!(
+            format!("{sid}"),
+            "S-1-5-21-1234567890-987654321-1122334455-1001"
+        );
     }
 
     #[test]
     fn sid_identity_high_auth() {
         // Auth values can in theory exceed 32 bits — top 16 bits go in
         // the BE u16 slot.
-        let sid = SidIdentity { revision: 1, auth: 0x0001_0000_0000, subauth: vec![] };
+        let sid = SidIdentity {
+            revision: 1,
+            auth: 0x0001_0000_0000,
+            subauth: vec![],
+        };
         let bytes = sid.to_bytes();
         // auth_high = 0x0001, auth_low = 0
         assert_eq!(&bytes[2..8], &[0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
@@ -469,17 +495,27 @@ mod tests {
 
     #[test]
     fn sid_identity_short_input_errors() {
-        assert!(matches!(SidIdentity::from_bytes(&[0u8; 7]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            SidIdentity::from_bytes(&[0u8; 7]),
+            Err(Error::ShortResponse)
+        ));
         // Header says 3 subauth, only one fits.
         let bytes = [0x01, 0x03, 0, 0, 0, 0, 0, 5, 0xAA, 0xBB, 0xCC, 0xDD];
-        assert!(matches!(SidIdentity::from_bytes(&bytes), Err(Error::ShortResponse)));
+        assert!(matches!(
+            SidIdentity::from_bytes(&bytes),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// `identity_to_bytes` wraps a SID with the type-3 header and pads
     /// to at least 0x4c (76) bytes total. Pad bytes are zero.
     #[test]
     fn identity_to_bytes_pads_to_minimum() {
-        let sid = SidIdentity { revision: 1, auth: 5, subauth: vec![21, 1, 2, 3] };
+        let sid = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: vec![21, 1, 2, 3],
+        };
         let bytes = identity_to_bytes(&sid);
         assert_eq!(bytes.len(), 0x4c);
         // Type = 3, length = 8 + 16 = 24
@@ -495,7 +531,11 @@ mod tests {
     #[test]
     fn identity_to_bytes_doesnt_truncate_large_sids() {
         let huge_subauth = vec![1u32; 32]; // 8 + 128 = 136 bytes inner
-        let sid = SidIdentity { revision: 1, auth: 5, subauth: huge_subauth };
+        let sid = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: huge_subauth,
+        };
         let bytes = identity_to_bytes(&sid);
         // Header (8) + inner (136) = 144 bytes. No padding above the cap.
         assert_eq!(bytes.len(), 144);
@@ -528,10 +568,18 @@ mod tests {
     /// (padded to 0x4c by `identity_to_bytes`).
     #[test]
     fn build_lookup_user_layout() {
-        let sid = SidIdentity { revision: 1, auth: 5, subauth: vec![18] };
+        let sid = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: vec![18],
+        };
         let f = build_lookup_user(/* StgWindsor */ 3, &sid);
         assert_eq!(f[0], 0x4a);
-        assert_eq!(u16::from_le_bytes([f[1], f[2]]), 0, "dbid=0 means lookup by identity");
+        assert_eq!(
+            u16::from_le_bytes([f[1], f[2]]),
+            0,
+            "dbid=0 means lookup by identity"
+        );
         assert_eq!(u16::from_le_bytes([f[3], f[4]]), 3, "storage dbid");
         let id_len = u16::from_le_bytes([f[5], f[6]]) as usize;
         assert_eq!(id_len, 0x4c, "identity is padded to 76 bytes");
@@ -549,15 +597,27 @@ mod tests {
     #[test]
     fn sid_identity_display_canonical_format() {
         // Well-known "Local System" SID: S-1-5-18.
-        let sys = SidIdentity { revision: 1, auth: 5, subauth: vec![18] };
+        let sys = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: vec![18],
+        };
         assert_eq!(sys.to_string(), "S-1-5-18");
 
         // BUILTIN\Administrators: S-1-5-32-544.
-        let admins = SidIdentity { revision: 1, auth: 5, subauth: vec![32, 544] };
+        let admins = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: vec![32, 544],
+        };
         assert_eq!(admins.to_string(), "S-1-5-32-544");
 
         // No subauth → just the prefix (still legal per the spec).
-        let bare = SidIdentity { revision: 1, auth: 5, subauth: vec![] };
+        let bare = SidIdentity {
+            revision: 1,
+            auth: 5,
+            subauth: vec![],
+        };
         assert_eq!(bare.to_string(), "S-1-5");
     }
 

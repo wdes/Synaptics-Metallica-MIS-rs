@@ -16,7 +16,10 @@ use think_touch::{
 };
 
 #[derive(Parser)]
-#[command(version, about = "Userspace driver for Synaptics/Validity Metallica-MIS fingerprint sensors")]
+#[command(
+    version,
+    about = "Userspace driver for Synaptics/Validity Metallica-MIS fingerprint sensors"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -293,7 +296,11 @@ fn main() -> ExitCode {
         Cmd::FwextInfo => fwext_info(),
         Cmd::Forget => forget(),
         Cmd::SaveCalib => save_calib(),
-        Cmd::TlsReadFlash { partition, addr, size } => tls_read_flash(partition, addr, size),
+        Cmd::TlsReadFlash {
+            partition,
+            addr,
+            size,
+        } => tls_read_flash(partition, addr, size),
         Cmd::DbInfo => db_info(),
         Cmd::DbChildren { dbid } => db_children(dbid),
         Cmd::DbValue { dbid } => db_value(dbid),
@@ -311,12 +318,16 @@ fn main() -> ExitCode {
         Cmd::Diagnose => diagnose(),
         Cmd::FrameToPgm { hex, out } => frame_to_pgm(&hex, &out),
         Cmd::DumpCmd02 { mode, out } => dump_cmd_02(&mode, out.as_deref()),
-        Cmd::TryIdentify { use_stored_calib, use_saved_calib } => {
-            try_identify(use_stored_calib, use_saved_calib)
-        }
-        Cmd::Enroll { subtype, sid_string, yes, use_saved_calib } => {
-            enroll_cmd(subtype, &sid_string, yes, use_saved_calib)
-        }
+        Cmd::TryIdentify {
+            use_stored_calib,
+            use_saved_calib,
+        } => try_identify(use_stored_calib, use_saved_calib),
+        Cmd::Enroll {
+            subtype,
+            sid_string,
+            yes,
+            use_saved_calib,
+        } => enroll_cmd(subtype, &sid_string, yes, use_saved_calib),
         Cmd::DeleteRecord { dbid, yes } => delete_record_cmd(dbid, yes),
     };
     match result {
@@ -414,12 +425,19 @@ fn version() -> Result<()> {
     let (status, payload) = split_status(&resp)?;
 
     println!("> 01");
-    println!("< status={} payload_len={}", fmt_status(status), payload.len());
+    println!(
+        "< status={} payload_len={}",
+        fmt_status(status),
+        payload.len()
+    );
     println!("  raw: {}", hex(&resp));
 
     let rom = RomInfo::parse(payload)?;
     println!("RomInfo:");
-    println!("  firmware build : {}.{}.{}", rom.major, rom.minor, rom.build);
+    println!(
+        "  firmware build : {}.{}.{}",
+        rom.major, rom.minor, rom.build
+    );
     println!(
         "  build timestamp: {} ({})",
         rom.timestamp,
@@ -433,7 +451,10 @@ fn version() -> Result<()> {
         println!("RomExtra (best-effort, undocumented upstream):");
         println!("  block_tag  : 0x{:04x}", extra.block_tag);
         println!("  hw_id      : {}", hex(&extra.hw_id));
-        println!("  state_flag : 0x{:08x} ({})", extra.state_flag, extra.state_flag);
+        println!(
+            "  state_flag : 0x{:08x} ({})",
+            extra.state_flag, extra.state_flag
+        );
         println!("  tail       : {}", hex(&extra.tail));
     }
 
@@ -449,22 +470,14 @@ fn version() -> Result<()> {
             rom.build,
             format_unix(rom.timestamp),
         );
-        eprintln!(
-            "         The on-chip ROM is generally not user-updatable, but a newer"
-        );
-        eprintln!(
-            "         firmware-extension blob (`xpfwext`) is loaded by the host on"
-        );
-        eprintln!(
-            "         every boot. For this device family Lenovo ships:"
-        );
+        eprintln!("         The on-chip ROM is generally not user-updatable, but a newer");
+        eprintln!("         firmware-extension blob (`xpfwext`) is loaded by the host on");
+        eprintln!("         every boot. For this device family Lenovo ships:");
         eprintln!();
         eprintln!("           file  : 6_07f_lenovo_mis_qm.xpfwext");
         eprintln!("           inside: https://download.lenovo.com/pccbbs/mobiles/nz3gf07w.exe");
         eprintln!();
-        eprintln!(
-            "         Upstream `python-validity` automates the download / extraction"
-        );
+        eprintln!("         Upstream `python-validity` automates the download / extraction");
         eprintln!(
             "         (see its `validity-sensors-firmware` script). synaptics-metallica-mis does"
         );
@@ -505,7 +518,11 @@ fn flash_read() -> Result<()> {
 
     let mut chan = Channel::open(&sensor)?;
     let buf = read_flash(&mut chan, TLS_FLASH_PARTITION, 0, 0x1000)?;
-    println!("read {} bytes from flash partition {}", buf.len(), TLS_FLASH_PARTITION);
+    println!(
+        "read {} bytes from flash partition {}",
+        buf.len(),
+        TLS_FLASH_PARTITION
+    );
 
     let blocks = parse_tls_flash(&buf)?;
     println!("\n{} block(s):", blocks.len());
@@ -599,15 +616,21 @@ fn load_or_decrypt_pairing(chan: &mut Channel) -> Result<cache::PairingCache> {
     let priv_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::PRIV_KEY)
-        .ok_or(Error::PairingMalformed { reason: "no priv-key block" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no priv-key block",
+        })?;
     let cert_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::TLS_CERT)
-        .ok_or(Error::PairingMalformed { reason: "no TLS cert block" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no TLS cert block",
+        })?;
     let ecdh_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::ECDH_Q)
-        .ok_or(Error::PairingMalformed { reason: "no ECDH q block" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no ECDH q block",
+        })?;
 
     let priv_key = pairing::decrypt_priv(&priv_blob.body, &keys)?;
     let q = pairing::parse_ecdh(&ecdh_blob.body)?;
@@ -640,7 +663,10 @@ fn load_or_decrypt_pairing(chan: &mut Channel) -> Result<cache::PairingCache> {
                 cache_path.display(),
             );
         } else {
-            log::warn!("could not write pairing cache to {}: {e}", cache_path.display());
+            log::warn!(
+                "could not write pairing cache to {}: {e}",
+                cache_path.display()
+            );
         }
     } else {
         log::info!("wrote pairing cache to {}", cache_path.display());
@@ -655,8 +681,13 @@ fn tls_handshake() -> Result<()> {
         println!("smoke test: cmd 0x01 (Get Version) via app-data…");
         let resp = session.cmd(chan, &[CMD_GET_VERSION])?;
         let (status, payload) = split_status(&resp)?;
-        println!("  app-data status: {status:#06x} payload_len={}", payload.len());
-        if status == 0 && let Ok(rom) = think_touch::RomInfo::parse(payload) {
+        println!(
+            "  app-data status: {status:#06x} payload_len={}",
+            payload.len()
+        );
+        if status == 0
+            && let Ok(rom) = think_touch::RomInfo::parse(payload)
+        {
             println!(
                 "  RomInfo via TLS : fw {}.{}.{} (cleartext-path baseline: 164)",
                 rom.major, rom.minor, rom.build,
@@ -672,11 +703,18 @@ fn identify_sensor() -> Result<()> {
         let resp = session.cmd(chan, &[0x75])?;
         let (status, payload) = split_status(&resp)?;
         if status != 0 {
-            eprintln!("identify_sensor: device returned status {}", fmt_status(status));
+            eprintln!(
+                "identify_sensor: device returned status {}",
+                fmt_status(status)
+            );
             return Ok(());
         }
         if payload.len() < 8 {
-            eprintln!("identify_sensor: short payload ({} B): {}", payload.len(), hex(payload));
+            eprintln!(
+                "identify_sensor: short payload ({} B): {}",
+                payload.len(),
+                hex(payload)
+            );
             return Ok(());
         }
         let zeroes = u32::from_le_bytes(payload[0..4].try_into().unwrap());
@@ -704,7 +742,11 @@ fn send(hex_str: &str) -> Result<()> {
         println!("> sending {} bytes: {}", bytes.len(), hex(&bytes));
         let resp = session.cmd(chan, &bytes)?;
         let (status, payload) = split_status(&resp)?;
-        println!("< status={}, payload_len={}", fmt_status(status), payload.len());
+        println!(
+            "< status={}, payload_len={}",
+            fmt_status(status),
+            payload.len()
+        );
         println!("  raw reply (status+payload): {}", hex(&resp));
         if !payload.is_empty() {
             println!("  payload only             : {}", hex(payload));
@@ -727,7 +769,11 @@ fn fwext_info() -> Result<()> {
         println!();
         println!("Firmware-extension info (cmd 0x43 02 over TLS):");
         println!("  version    : {}.{}", p.major, p.minor);
-        println!("  buildtime  : {} ({})", p.buildtime, format_unix(p.buildtime));
+        println!(
+            "  buildtime  : {} ({})",
+            p.buildtime,
+            format_unix(p.buildtime)
+        );
         println!("  modules    : {}", p.modules.len());
         for (i, m) in p.modules.iter().enumerate() {
             println!(
@@ -762,7 +808,11 @@ fn db_children(dbid: u16) -> Result<()> {
         // re-check: no, it doesn't strip; it uses `<xx...>` to skip.
         // We *did* strip via split_status, so we offset by -2 here.
         if payload.len() < 12 {
-            eprintln!("db-children: short payload ({} B): {}", payload.len(), hex(payload));
+            eprintln!(
+                "db-children: short payload ({} B): {}",
+                payload.len(),
+                hex(payload)
+            );
             return Ok(());
         }
         let parent_dbid = u16::from_le_bytes(payload[0..2].try_into().unwrap());
@@ -901,7 +951,11 @@ fn db_value(dbid: u16) -> Result<()> {
         // After our split_status strip, that's:
         //   u16 dbid u16 type u16 storage u16 sz <value> (10 B header)
         if payload.len() < 10 {
-            eprintln!("db-value: short payload ({} B): {}", payload.len(), hex(payload));
+            eprintln!(
+                "db-value: short payload ({} B): {}",
+                payload.len(),
+                hex(payload)
+            );
             return Ok(());
         }
         let id = u16::from_le_bytes(payload[0..2].try_into().unwrap());
@@ -915,8 +969,11 @@ fn db_value(dbid: u16) -> Result<()> {
         println!("  dbid={id} (0x{id:04x}), type=0x{typ:04x}, storage=0x{storage:04x}");
         println!("  size : {sz} bytes");
         let preview = value.len().min(128);
-        println!("  bytes: {}{}", hex(&value[..preview]),
-            if value.len() > preview { " …" } else { "" });
+        println!(
+            "  bytes: {}{}",
+            hex(&value[..preview]),
+            if value.len() > preview { " …" } else { "" }
+        );
         // Best-effort UTF-8 view if it looks ASCII-ish.
         if value.iter().all(|&b| matches!(b, 0x20..=0x7e | 0)) {
             let s = String::from_utf8_lossy(value).replace('\0', "·");
@@ -938,7 +995,10 @@ fn factory_calibration() -> Result<()> {
         let resp = session.cmd(chan, &req)?;
         let (status, payload) = split_status(&resp)?;
         if status != 0 {
-            eprintln!("factory-calibration: device returned status {}", fmt_status(status));
+            eprintln!(
+                "factory-calibration: device returned status {}",
+                fmt_status(status)
+            );
             return Ok(());
         }
         if payload.len() < 8 {
@@ -1015,7 +1075,9 @@ fn fetch_factory_calibration_values(
     let resp = session.cmd(chan, &req)?;
     let (status, payload) = split_status(&resp)?;
     if status != 0 || payload.len() < 8 {
-        return Err(Error::PairingMalformed { reason: "factory_bits(0x0e00) failed" });
+        return Err(Error::PairingMalformed {
+            reason: "factory_bits(0x0e00) failed",
+        });
     }
     let entries = u32::from_le_bytes(payload[4..8].try_into().unwrap()) as usize;
     let mut p = &payload[8..];
@@ -1034,9 +1096,13 @@ fn fetch_factory_calibration_values(
         }
         p = &p[12 + len..];
     }
-    let value = subtag3.ok_or(Error::PairingMalformed { reason: "no subtag=3 in factory_bits" })?;
+    let value = subtag3.ok_or(Error::PairingMalformed {
+        reason: "no subtag=3 in factory_bits",
+    })?;
     if value.len() < 4 {
-        return Err(Error::PairingMalformed { reason: "factory_calibration_values too short" });
+        return Err(Error::PairingMalformed {
+            reason: "factory_calibration_values too short",
+        });
     }
     Ok(value[4..].to_vec())
 }
@@ -1051,7 +1117,9 @@ fn fetch_factory_subst(
 ) -> Result<u8> {
     let values = fetch_factory_calibration_values(chan, session)?;
     if key_calibration_line >= values.len() {
-        return Err(Error::PairingMalformed { reason: "factory_calibration_values too short" });
+        return Err(Error::PairingMalformed {
+            reason: "factory_calibration_values too short",
+        });
     }
     Ok(values[key_calibration_line])
 }
@@ -1065,7 +1133,11 @@ fn dump_cmd_02(mode: &str, out_path: Option<&str>) -> Result<()> {
         "calibrate" => CaptureMode::Calibrate,
         "identify" => CaptureMode::Identify,
         "enroll" => CaptureMode::Enroll,
-        _ => return Err(Error::PairingMalformed { reason: "unknown mode" }),
+        _ => {
+            return Err(Error::PairingMalformed {
+                reason: "unknown mode",
+            });
+        }
     };
 
     let key_line = vec![0u8; FM_3367_001.line_width as usize];
@@ -1081,7 +1153,10 @@ fn dump_cmd_02(mode: &str, out_path: Option<&str>) -> Result<()> {
         /* calib_data */ &[],
     )?;
 
-    println!("cmd 0x02 ({mode}, key_line=zeros, subst=0): {} bytes", pkt.len());
+    println!(
+        "cmd 0x02 ({mode}, key_line=zeros, subst=0): {} bytes",
+        pkt.len()
+    );
     println!();
     println!("header (5 bytes): {}", hex(&pkt[..5.min(pkt.len())]));
     if pkt.len() >= 5 {
@@ -1170,7 +1245,11 @@ fn diagnose() -> Result<()> {
     with_session(|chan, session| {
         let resp = session.cmd(chan, &[CMD_GET_VERSION])?;
         let (s, p) = split_status(&resp)?;
-        println!("  cmd 0x01 over TLS: status={} payload_len={}", fmt_status(s), p.len());
+        println!(
+            "  cmd 0x01 over TLS: status={} payload_len={}",
+            fmt_status(s),
+            p.len()
+        );
 
         let resp = session.cmd(chan, &[0x75])?;
         let (s, p) = split_status(&resp)?;
@@ -1182,11 +1261,17 @@ fn diagnose() -> Result<()> {
 
         let resp = session.cmd(chan, &[CMD_PROBE_19])?;
         let (s, p) = split_status(&resp)?;
-        println!("  cmd 0x19: status={} payload_len={}", fmt_status(s), p.len());
+        println!(
+            "  cmd 0x19: status={} payload_len={}",
+            fmt_status(s),
+            p.len()
+        );
 
         let resp = session.cmd(chan, &[0x43, FWEXT_PARTITION])?;
         let (s, p) = split_status(&resp)?;
-        if s == 0 && let Ok(part) = PartitionInfo::parse(p) {
+        if s == 0
+            && let Ok(part) = PartitionInfo::parse(p)
+        {
             println!(
                 "  fwext: {}.{} build {} ({}), {} modules",
                 part.major,
@@ -1204,9 +1289,7 @@ fn diagnose() -> Result<()> {
             let used = u32::from_le_bytes(p[12..16].try_into().unwrap());
             let records = u16::from_le_bytes(p[20..22].try_into().unwrap());
             let nroots = u16::from_le_bytes(p[22..24].try_into().unwrap());
-            println!(
-                "  db: {records} records, {nroots} roots, {used}/{total} bytes used",
-            );
+            println!("  db: {records} records, {nroots} roots, {used}/{total} bytes used",);
         }
 
         let subst = fetch_factory_subst(chan, session, 0x38)?;
@@ -1237,26 +1320,33 @@ fn diagnose() -> Result<()> {
 /// into a [`SidIdentity`]. Returns a structured error on bad input.
 fn parse_sid_string(s: &str) -> Result<think_touch::db::SidIdentity> {
     use think_touch::db::SidIdentity;
-    let stripped = s.strip_prefix("S-")
-        .ok_or(Error::PairingMalformed { reason: "SID must start with 'S-'" })?;
+    let stripped = s.strip_prefix("S-").ok_or(Error::PairingMalformed {
+        reason: "SID must start with 'S-'",
+    })?;
     let parts: Vec<&str> = stripped.split('-').collect();
     if parts.len() < 2 {
-        return Err(Error::PairingMalformed { reason: "SID must have at least revision and auth" });
+        return Err(Error::PairingMalformed {
+            reason: "SID must have at least revision and auth",
+        });
     }
-    let revision: u8 = parts[0]
-        .parse()
-        .map_err(|_| Error::PairingMalformed { reason: "SID revision parse failed" })?;
-    let auth: u64 = parts[1]
-        .parse()
-        .map_err(|_| Error::PairingMalformed { reason: "SID auth parse failed" })?;
+    let revision: u8 = parts[0].parse().map_err(|_| Error::PairingMalformed {
+        reason: "SID revision parse failed",
+    })?;
+    let auth: u64 = parts[1].parse().map_err(|_| Error::PairingMalformed {
+        reason: "SID auth parse failed",
+    })?;
     let mut subauth = Vec::with_capacity(parts.len() - 2);
     for sub in &parts[2..] {
-        let v: u32 = sub
-            .parse()
-            .map_err(|_| Error::PairingMalformed { reason: "SID subauth parse failed" })?;
+        let v: u32 = sub.parse().map_err(|_| Error::PairingMalformed {
+            reason: "SID subauth parse failed",
+        })?;
         subauth.push(v);
     }
-    Ok(SidIdentity { revision, auth, subauth })
+    Ok(SidIdentity {
+        revision,
+        auth,
+        subauth,
+    })
 }
 
 /// `write_enable` followed by a single TLS command, with `call_cleanups`
@@ -1273,7 +1363,9 @@ fn write_enable_then(
     let resp = session.cmd(chan, &DB_WRITE_ENABLE_9A)?;
     let (s, _) = split_status(&resp)?;
     if s != 0 {
-        return Err(Error::PairingMalformed { reason: "db_write_enable rejected" });
+        return Err(Error::PairingMalformed {
+            reason: "db_write_enable rejected",
+        });
     }
     // Step 2: send the actual command. Capture the result; we still
     // need to call_cleanups even on error.
@@ -1296,8 +1388,7 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
     use think_touch::blobs::{GLOW_END_SCAN, GLOW_START_SCAN};
     use think_touch::cache::CALIB_DATA_PATH;
     use think_touch::capture::{
-        CaptureMode, average_interleaved, build_cmd_02, get_key_line,
-        process_calibration_results,
+        CaptureMode, average_interleaved, build_cmd_02, get_key_line, process_calibration_results,
     };
     use think_touch::db::{
         build_get_record_children, build_lookup_user, build_new_record, identity_to_bytes,
@@ -1336,31 +1427,42 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
 
         // 0. Resolve StgWindsor's dbid (always 3 on this device, but
         //    fetch it for correctness).
-        let resp = session.cmd(chan, &[0x4b, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])?;
+        let resp = session.cmd(
+            chan,
+            &[0x4b, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        )?;
         let (s, p) = split_status(&resp)?;
         if s != 0 {
             eprintln!("get_user_storage failed: {}", fmt_status(s));
             return Ok(());
         }
-        let stg = parse_user_storage(p)?
-            .ok_or(Error::PairingMalformed { reason: "StgWindsor missing" })?;
+        let stg = parse_user_storage(p)?.ok_or(Error::PairingMalformed {
+            reason: "StgWindsor missing",
+        })?;
         let stg_dbid = stg.dbid;
         println!("StgWindsor dbid: {stg_dbid}");
 
         // 1. Pre-flight calibration (re-run; matches `try-identify`).
         let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
-        let subst_value = factory_cal_values.get(KEY_CAL_LINE as usize).copied()
-            .ok_or(Error::PairingMalformed { reason: "factory_calibration_values too short" })?;
+
+        let subst_value = factory_cal_values
+            .get(KEY_CAL_LINE as usize)
+            .copied()
+            .ok_or(Error::PairingMalformed {
+                reason: "factory_calibration_values too short",
+            })?;
         println!("subst_value: 0x{subst_value:02x}");
         println!();
         println!("┌────────────────────────────────────────────────────────────┐");
-        println!("│  ENROLL — repeated press cycles for finger {subtype:<2} ({label:<22})│",
-                 label = subtype_label);
+        println!(
+            "│  ENROLL — repeated press cycles for finger {subtype:<2} ({label:<22})│",
+            label = subtype_label
+        );
         println!("│                                                            │");
         println!("│  Each press cycle:                                         │");
         println!("│    Waiting for finger…  →  place finger on sensor          │");
-        println!("│    Reading — hold STILL for 2-3 seconds…                   │");
-        println!("│    ✓ Reading OK!  or  ✗ Too quick — press firmer, hold.   │");
+        println!("│    Reading — hold finger still during capture              │");
+        println!("│    Lift fully between completed capture attempts           │");
         println!("│                                                            │");
         println!("│  After ~8 good captures the device emits a final tid and  │");
         println!("│  the finger record is written to flash partition 4.       │");
@@ -1370,17 +1472,25 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
         let calib_data: Vec<u8> = if use_saved_calib {
             let path = Path::new(CALIB_DATA_PATH);
             if !path.exists() {
-                eprintln!("--use-saved-calib: no calib_data at {} — run `save-calib` first.",
-                          path.display());
+                eprintln!(
+                    "--use-saved-calib: no calib_data at {} — run `save-calib` first.",
+                    path.display()
+                );
                 return Ok(());
             }
             let bytes = std::fs::read(path)?;
-            println!("[saved-calib] loaded {} B from {}", bytes.len(), path.display());
+            println!(
+                "[saved-calib] loaded {} B from {}",
+                bytes.len(),
+                path.display()
+            );
             bytes
         } else {
             let mut buf: Vec<u8> = Vec::new();
+
             for iter in 1..=CALIBRATION_ITERATIONS {
                 let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &buf);
+
                 let pkt = build_cmd_02(
                     CaptureMode::Calibrate,
                     &FM_3367_001_PROG,
@@ -1389,15 +1499,18 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     CALIBRATION_FRAMES,
                     LINES_PER_FRAME,
                     0,
-                    &[],
-                    &[],
+                    &factory_cal_values,
+                    &buf,
                 )?;
+
                 let resp = session.cmd(chan, &pkt)?;
                 let (status, _) = split_status(&resp)?;
+
                 if status != 0 {
                     eprintln!("calibrate iter {iter}: status {}", fmt_status(status));
                     return Ok(());
                 }
+
                 let raw = chan.read_async()?;
                 let cooked = average_interleaved(
                     &raw,
@@ -1405,24 +1518,15 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     LINES_PER_FRAME as u32,
                     CALIBRATION_FRAMES as u32,
                 );
-                process_calibration_results(
-                    &mut buf,
-                    &cooked,
-                    FM_3367_001.bytes_per_line as usize,
-                );
+
+                process_calibration_results(&mut buf, &cooked, FM_3367_001.bytes_per_line as usize);
+
                 println!("  calibrate iter {iter}/{CALIBRATION_ITERATIONS} ok");
             }
+
             buf
         };
         let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
-
-        // 2. Defensive: end any prior enrollment session (cmd 0x69 0)
-        //    before starting a new one. If the previous run was Ctrl-C'd
-        //    during enroll, the device may still consider an enrolment
-        //    "open"; create_enrollment then succeeds but capture(ENROLL)
-        //    never emits matcher events. Status is ignored — if there's
-        //    nothing to end, it returns harmlessly.
-        let _ = session.cmd(chan, &build_enrollment_mode(0));
 
         //    create_enrollment (cmd 0x69 01).
         let resp = session.cmd(chan, &build_enrollment_mode(1))?;
@@ -1515,24 +1619,34 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     break;
                 }
             }
-            print!("\r  Reading — hold finger STILL for 2-3 seconds…    ");
+            print!("\r  Reading — hold finger still…                      ");
             let _ = std::io::stdout().flush();
 
-            // Wait for capture-complete (b[0]==3 with bit 0x04 set).
+            // Wait for capture-complete, matching python-validity Sensor.capture():
+            // every event here must be type 0x03; bit 0x04 in byte 2 marks completion.
             loop {
                 let evt = chan.wait_int()?;
-                if evt.first() == Some(&0x03) && evt.len() >= 3 && (evt[2] & 0x04) != 0 {
+                if evt.first() != Some(&0x03) {
+                    eprintln!("  unexpected enrollment interrupt type: {}", hex(&evt));
+                    let _ = session.cmd(chan, &[0x04]);
+                    let _ = session.cmd(chan, &build_enrollment_mode(0));
+                    return Ok(());
+                }
+
+                if evt.len() >= 3 && (evt[2] & 0x04) != 0 {
                     break;
                 }
             }
-
             // get_prg_status2: error == 0 = good scan. Anything else
             // (we observe 0x00080000 ≈ "low quality" on this device) is
             // a "skip this iteration" signal upstream.
             let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
             let (status, payload) = split_status(&resp)?;
             if status != 0 {
-                println!("\r  ✗ Device error: {}                          ", fmt_status(status));
+                println!(
+                    "\r  ✗ Device error: {}                          ",
+                    fmt_status(status)
+                );
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
@@ -1540,9 +1654,7 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
             if cs.error != 0 {
                 // 0x00080000 = "too quick" / "poor contact" most often
                 // on this device. Tell the user what to change.
-                println!(
-                    "\r  ✗ Too quick or off-center — press FIRMER, hold longer. "
-                );
+                println!("\r  ✗ Too quick or off-center — press FIRMER, hold longer. ");
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
@@ -1570,7 +1682,10 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                 continue;
             }
             if p.len() < 2 {
-                eprintln!("  append_new_image: short reply ({} B) — retrying.", p.len());
+                eprintln!(
+                    "  append_new_image: short reply ({} B) — retrying.",
+                    p.len()
+                );
                 let _ = session.cmd(chan, &build_enrollment_mode(0));
                 continue;
             }
@@ -1593,11 +1708,15 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
             let mut header_progress: Option<u16> = None;
             let mut tid: Option<Vec<u8>> = None;
             while !walker.is_empty() {
-                if walker.len() < 4 { break; }
+                if walker.len() < 4 {
+                    break;
+                }
                 let tag = u16::from_le_bytes([walker[0], walker[1]]);
                 let l = u16::from_le_bytes([walker[2], walker[3]]) as usize;
                 let chunk_size = ENROLL_MAGIC_LEN + l;
-                if walker.len() < chunk_size { break; }
+                if walker.len() < chunk_size {
+                    break;
+                }
                 let val = &walker[ENROLL_MAGIC_LEN..ENROLL_MAGIC_LEN + l];
                 match tag {
                     0 => new_prev = Some(walker[..chunk_size].to_vec()),
@@ -1615,9 +1734,7 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
             }
             if let Some(progress) = header_progress {
                 let bits = progress.count_ones() as usize;
-                let bar: String = (0..5)
-                    .map(|i| if i < bits { '●' } else { '○' })
-                    .collect();
+                let bar: String = (0..5).map(|i| if i < bits { '●' } else { '○' }).collect();
                 println!("    progress: {bar}  ({bits}/5 features captured)");
             }
             if let Some(t) = tid {
@@ -1770,14 +1887,20 @@ fn match_finger(retries: u32) -> Result<()> {
             "no saved calibration at {} — run `save-calib` first.",
             calib_path.display(),
         );
-        return Err(Error::PairingMalformed { reason: "calib_data missing" });
+        return Err(Error::PairingMalformed {
+            reason: "calib_data missing",
+        });
     }
     let calib_data = std::fs::read(calib_path)?;
 
     with_session(|chan, session| {
         let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
-        let subst_value = factory_cal_values.get(KEY_CAL_LINE as usize).copied()
-            .ok_or(Error::PairingMalformed { reason: "factory_calibration_values too short" })?;
+        let subst_value = factory_cal_values
+            .get(KEY_CAL_LINE as usize)
+            .copied()
+            .ok_or(Error::PairingMalformed {
+                reason: "factory_calibration_values too short",
+            })?;
         let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &calib_data);
 
         let mut consecutive_rejects: u32 = 0;
@@ -1789,14 +1912,20 @@ fn match_finger(retries: u32) -> Result<()> {
             // just produces the same low-quality scan again.
             if attempt == 1 {
                 eprintln!("press your enrolled finger now");
-            } else if consecutive_rejects >= CONSECUTIVE_REJECT_HINT {
-                eprintln!(
-                    "attempt {attempt}/{retries}: lift your finger fully (~1 s), then press FIRMER and centered."
-                );
-                std::thread::sleep(std::time::Duration::from_millis(1500));
             } else {
-                eprintln!("attempt {attempt}/{retries}: lift your finger, then press again");
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                if consecutive_rejects >= CONSECUTIVE_REJECT_HINT {
+                    eprintln!(
+                        "attempt {attempt}/{retries}: lift your finger fully and keep it off the sensor…"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    eprintln!("press FIRMER and centered now");
+                } else {
+                    eprintln!(
+                        "attempt {attempt}/{retries}: lift your finger and keep it off the sensor…"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    eprintln!("press again now");
+                }
             }
 
             let _ = session.cmd(chan, &GLOW_START_SCAN)?;
@@ -1811,19 +1940,24 @@ fn match_finger(retries: u32) -> Result<()> {
                 &factory_cal_values,
                 &calib_data,
             )?;
+
             let resp = session.cmd(chan, &pkt)?;
             let (status, _) = split_status(&resp)?;
             if status != 0 {
                 let _ = session.cmd(chan, &GLOW_END_SCAN);
                 eprintln!("capture rejected: {}", fmt_status(status));
-                return Err(Error::PairingMalformed { reason: "capture rejected" });
+                return Err(Error::PairingMalformed {
+                    reason: "capture rejected",
+                });
             }
 
             // Drain start, finger, capture-complete events.
             let _ = chan.wait_int()?;
             loop {
                 let evt = chan.wait_int()?;
-                if evt.first() == Some(&0x02) { break; }
+                if evt.first() == Some(&0x02) {
+                    break;
+                }
             }
             loop {
                 let evt = chan.wait_int()?;
@@ -1836,18 +1970,39 @@ fn match_finger(retries: u32) -> Result<()> {
             let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
             let (status, payload) = split_status(&resp)?;
             let cs = think_touch::protocol::CaptureStatus::parse(payload)?;
+
+            // Python-validity Sensor.capture() always sends capture-stop (cmd 0x04)
+            // in a finally block, on both successful and rejected scans.
+            let stop = session.cmd(chan, &[0x04]);
+            if let Err(e) = stop {
+                eprintln!("  warn: capture-stop failed: {e}");
+            }
+
             if status != 0 || cs.error != 0 {
                 consecutive_rejects += 1;
+
                 eprintln!(
-                    "  scan rejected (status={}, error=0x{:08x})",
-                    fmt_status(status), cs.error,
+                    "  scan rejected: x={} y={} w1={} w2={} status={} error=0x{:08x}",
+                    cs.x,
+                    cs.y,
+                    cs.w1,
+                    cs.w2,
+                    fmt_status(status),
+                    cs.error,
                 );
+
+                // Each retry must start from a fully stopped capture and LED state.
+                let _ = session.cmd(chan, &GLOW_END_SCAN);
+
                 if attempt == retries {
-                    let _ = session.cmd(chan, &GLOW_END_SCAN);
-                    return Err(Error::PairingMalformed { reason: "low quality scan after retries" });
+                    return Err(Error::PairingMalformed {
+                        reason: "low quality scan after retries",
+                    });
                 }
+
                 continue;
             }
+
             consecutive_rejects = 0;
             let _ = session.cmd(chan, &GLOW_END_SCAN);
 
@@ -1866,7 +2021,9 @@ fn match_finger(retries: u32) -> Result<()> {
             if s != 0 {
                 eprintln!("match cmd rejected: {}", fmt_status(s));
                 let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
-                return Err(Error::PairingMalformed { reason: "match cmd rejected" });
+                return Err(Error::PairingMalformed {
+                    reason: "match cmd rejected",
+                });
             }
 
             // Wait for verdict.
@@ -1896,13 +2053,15 @@ fn match_finger(retries: u32) -> Result<()> {
 fn fetch_match_result(chan: &mut Channel, session: &handshake::Session) -> Result<()> {
     use think_touch::db::subtype_name;
 
-        // Fetch result.
+    // Fetch result.
     let resp = session.cmd(chan, &[0x60, 0x00, 0x00, 0x00, 0x00])?;
     let (s, payload) = split_status(&resp)?;
     let _ = session.cmd(chan, &[0x62, 0, 0, 0, 0]);
     if s != 0 || payload.len() < 2 {
         eprintln!("fetch result failed: {}", fmt_status(s));
-        return Err(Error::PairingMalformed { reason: "fetch result failed" });
+        return Err(Error::PairingMalformed {
+            reason: "fetch result failed",
+        });
     }
     let body_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
     let body = &payload[2..2 + body_len.min(payload.len() - 2)];
@@ -1912,7 +2071,9 @@ fn fetch_match_result(chan: &mut Channel, session: &handshake::Session) -> Resul
     while p.len() >= 4 {
         let tag = u16::from_le_bytes([p[0], p[1]]);
         let l = u16::from_le_bytes([p[2], p[3]]) as usize;
-        if 4 + l > p.len() { break; }
+        if 4 + l > p.len() {
+            break;
+        }
         let val = &p[4..4 + l];
         match tag {
             1 if l == 4 => user_id = Some(u32::from_le_bytes(val.try_into().unwrap())),
@@ -1929,7 +2090,9 @@ fn fetch_match_result(chan: &mut Channel, session: &handshake::Session) -> Resul
         }
         _ => {
             eprintln!("matcher returned malformed payload: {}", hex(body));
-            Err(Error::PairingMalformed { reason: "malformed match payload" })
+            Err(Error::PairingMalformed {
+                reason: "malformed match payload",
+            })
         }
     }
 }
@@ -1974,7 +2137,11 @@ fn int_probe(hex_str: &str, count: usize) -> Result<()> {
         println!("> sending {} bytes: {}", bytes.len(), hex(&bytes));
         let resp = session.cmd(chan, &bytes)?;
         let (status, payload) = split_status(&resp)?;
-        println!("< cmd reply: status={} payload_len={}", fmt_status(status), payload.len());
+        println!(
+            "< cmd reply: status={} payload_len={}",
+            fmt_status(status),
+            payload.len()
+        );
         println!("\nwaiting for {count} interrupt event(s) on EP 0x83…");
         for i in 1..=count {
             let evt = chan.wait_int()?;
@@ -2061,8 +2228,8 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
                     CALIBRATION_FRAMES,
                     LINES_PER_FRAME,
                     0,
-                    /* factory_calibration_values */ &[],
-                    /* calib_data */ &[],
+                    &factory_cal_values,
+                    &buf,
                 )?;
                 println!(
                     "\n[calibration iter {iter}/{CALIBRATION_ITERATIONS}] cmd 0x02 ({} B) …",
@@ -2081,13 +2248,10 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
                     LINES_PER_FRAME as u32,
                     CALIBRATION_FRAMES as u32,
                 );
-                process_calibration_results(
-                    &mut buf,
-                    &cooked,
-                    FM_3367_001.bytes_per_line as usize,
-                );
+                process_calibration_results(&mut buf, &cooked, FM_3367_001.bytes_per_line as usize);
                 println!("  raw {} B → calib_data {} B", raw.len(), buf.len());
             }
+
             buf
         };
 
@@ -2121,7 +2285,11 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
         println!("> sending cmd 0x02 (IDENTIFY), {} bytes", pkt.len());
         let resp = session.cmd(chan, &pkt)?;
         let (status, payload) = split_status(&resp)?;
-        println!("< cmd reply: status={} payload_len={}", fmt_status(status), payload.len());
+        println!(
+            "< cmd reply: status={} payload_len={}",
+            fmt_status(status),
+            payload.len()
+        );
         if status != 0 {
             let _ = session.cmd(chan, &GLOW_END_SCAN);
             eprintln!("device rejected IDENTIFY (status {})", fmt_status(status));
@@ -2178,19 +2346,34 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
         // 5. Capture metadata via `get_prg_status2` (cmd 0x51 0x00 0x20 0x00 0x00).
         let resp = session.cmd(chan, &[0x51, 0x00, 0x20, 0x00, 0x00])?;
         let (status, payload) = split_status(&resp)?;
-        println!("\n> get_prg_status2: status={} payload_len={}", fmt_status(status), payload.len());
+        println!(
+            "\n> get_prg_status2: status={} payload_len={}",
+            fmt_status(status),
+            payload.len()
+        );
 
         // Decode the metadata via the typed parser — even on non-zero
         // status, the body still carries x/y/w1/w2/error fields that
         // explain *why* the scan failed.
         match think_touch::protocol::CaptureStatus::parse(payload) {
             Ok(s) => {
-                println!("  x={} y={} w1={} w2={} error=0x{:08x}", s.x, s.y, s.w1, s.w2, s.error);
+                println!(
+                    "  x={} y={} w1={} w2={} error=0x{:08x}",
+                    s.x, s.y, s.w1, s.w2, s.error
+                );
                 if let Some(label) = s.error_label() {
                     println!("  → {label}");
                 }
             }
             Err(_) => println!("  raw: {}", hex(payload)),
+        }
+
+        // Python-validity Sensor.capture() always sends capture-stop after
+        // get_prg_status2(), before the caller starts the matcher.
+        let stop = session.cmd(chan, &[0x04]);
+        match stop {
+            Ok(_) => println!("> capture-stop: OK"),
+            Err(e) => eprintln!("> capture-stop failed: {e}"),
         }
 
         // IDENTIFY mode does NOT push image data on EP 0x82 — the
@@ -2211,6 +2394,7 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
         //         = STATUS_NOT_FOUND, expected when StgWindsor.users==0).
         //    c. If matched, fetch result with cmd 0x60.
         //    d. Always run cmd 0x62 cleanup at the end.
+
         println!();
         println!("> match-finger (cmd 0x5e, all-storages all-users)…");
         let mut match_cmd = Vec::with_capacity(13);
@@ -2241,7 +2425,10 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
             // no enrolment exists. The trailer byte is opaque.
             if verdict.len() >= 4 {
                 let body_status = u16::from_le_bytes([verdict[2], verdict[3]]);
-                println!("  → no DB match (verdict status: {})", fmt_status(body_status));
+                println!(
+                    "  → no DB match (verdict status: {})",
+                    fmt_status(body_status)
+                );
             } else {
                 println!("  → no DB match (short verdict)");
             }
@@ -2268,7 +2455,9 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
                 while p.len() >= 4 {
                     let tag = u16::from_le_bytes([p[0], p[1]]);
                     let l = u16::from_le_bytes([p[2], p[3]]) as usize;
-                    if 4 + l > p.len() { break; }
+                    if 4 + l > p.len() {
+                        break;
+                    }
                     let val = &p[4..4 + l];
                     match tag {
                         1 if l == 4 => user_id = Some(u32::from_le_bytes(val.try_into().unwrap())),
@@ -2327,14 +2516,21 @@ fn factory_bits(tag: u16) -> Result<()> {
         let resp = session.cmd(chan, &req)?;
         let (status, payload) = split_status(&resp)?;
         if status != 0 {
-            eprintln!("factory-bits: device returned status {}", fmt_status(status));
+            eprintln!(
+                "factory-bits: device returned status {}",
+                fmt_status(status)
+            );
             return Ok(());
         }
         // Per upstream `sensor.py:get_factory_bits`:
         //   <u32 wtf, u32 entries, then `entries` records>
         // Each record: <u32 ptr, u16 len, u16 tag, u16 subtag, u16 flags, body[len]>.
         if payload.len() < 8 {
-            eprintln!("factory-bits: short payload ({} B): {}", payload.len(), hex(payload));
+            eprintln!(
+                "factory-bits: short payload ({} B): {}",
+                payload.len(),
+                hex(payload)
+            );
             return Ok(());
         }
         let wtf = u32::from_le_bytes(payload[0..4].try_into().unwrap());
@@ -2396,6 +2592,7 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
         chan: &mut Channel,
         session: &handshake::Session,
         label: &str,
+        factory_cal_values: &[u8],
     ) -> Result<(Vec<u8>, Vec<u8>)> {
         let key_line = vec![0u8; FM_3367_001.line_width as usize];
         let pkt = build_cmd_02(
@@ -2406,7 +2603,7 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
             3,
             224,
             0,
-            &[],
+            factory_cal_values,
             &[],
         )?;
         let resp = session.cmd(chan, &pkt)?;
@@ -2416,7 +2613,11 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
         }
         let frame = chan.read_async()?;
         let cooked = average_interleaved(&frame, &FM_3367_001, 224, 3);
-        println!("  [{label}] EP-0x82 raw: {} B, cooked: {} B", frame.len(), cooked.len());
+        println!(
+            "  [{label}] EP-0x82 raw: {} B, cooked: {} B",
+            frame.len(),
+            cooked.len()
+        );
         if cooked.len() >= 8 {
             println!("       cooked line-0 header: {}", hex(&cooked[..8]));
         }
@@ -2425,17 +2626,24 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
 
     with_session(|chan, session| {
         println!("HANDSHAKE OK ✓");
+        let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
+        println!("factory_calibration_values: {} B", factory_cal_values.len());
 
         // Run the same calibrate twice with the same key_line. Same
         // physical sensor + same key_line → cooked outputs should be
         // very close (only sensor-noise variation).
         println!("\nrun 1:");
-        let (cooked_a, raw_a) = one_pass(chan, session, "1")?;
+        let (cooked_a, raw_a) = one_pass(chan, session, "1", &factory_cal_values)?;
+
         println!("\nrun 2:");
-        let (cooked_b, _raw_b) = one_pass(chan, session, "2")?;
+        let (cooked_b, _raw_b) = one_pass(chan, session, "2", &factory_cal_values)?;
 
         // Self-consistency: how stable is our pipeline?
-        let same = cooked_a.iter().zip(cooked_b.iter()).filter(|(a, b)| a == b).count();
+        let same = cooked_a
+            .iter()
+            .zip(cooked_b.iter())
+            .filter(|(a, b)| a == b)
+            .count();
         println!(
             "\nrun1 vs run2 byte agreement: {}/{} ({:.1}%) — high % means the pipeline is\n\
              stable (same key_line → same data, modulo sensor noise).",
@@ -2471,8 +2679,11 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
         let p6 = session.read_flash_all(chan, 6, 0, 0x8000)?;
         match parse_calibration(&p6) {
             Ok(stored) => {
-                let same =
-                    stored.iter().zip(cooked_a.iter()).filter(|(a, b)| a == b).count();
+                let same = stored
+                    .iter()
+                    .zip(cooked_a.iter())
+                    .filter(|(a, b)| a == b)
+                    .count();
                 println!(
                     "  agreement: {}/{} ({:.1}%) — {} headers + {} pixels.",
                     same,
@@ -2515,7 +2726,10 @@ fn flash_info() -> Result<()> {
         );
         println!("  blocks     : {}", layout.ic.blocks);
         println!("  block size : {} bytes", layout.ic.block_size);
-        println!("  total size : {total} bytes ({:.0} KiB)", total as f64 / 1024.0);
+        println!(
+            "  total size : {total} bytes ({:.0} KiB)",
+            total as f64 / 1024.0
+        );
         println!();
         println!("Partitions ({}):", layout.partitions.len());
         for (i, p) in layout.partitions.iter().enumerate() {
@@ -2548,7 +2762,11 @@ fn db_info() -> Result<()> {
         // Layout: <u32 unknown1, u32 unknown0, u32 total, u32 used,
         //         u32 free, u16 records, u16 nroots> then nroots × u16 roots.
         if payload.len() < 0x18 {
-            eprintln!("db-info: short payload ({} B): {}", payload.len(), hex(payload));
+            eprintln!(
+                "db-info: short payload ({} B): {}",
+                payload.len(),
+                hex(payload)
+            );
             return Ok(());
         }
         let u32_at = |o: usize| u32::from_le_bytes(payload[o..o + 4].try_into().unwrap());
@@ -2577,9 +2795,8 @@ fn db_info() -> Result<()> {
         println!("  roots    : {nroots}");
         if payload.len() >= 0x18 + nroots * 2 {
             for i in 0..nroots {
-                let r = u16::from_le_bytes(
-                    payload[0x18 + i * 2..0x18 + i * 2 + 2].try_into().unwrap(),
-                );
+                let r =
+                    u16::from_le_bytes(payload[0x18 + i * 2..0x18 + i * 2 + 2].try_into().unwrap());
                 println!("    [{i}] 0x{r:04x}");
             }
         }
@@ -2608,7 +2825,10 @@ fn tls_read_flash(partition: u8, addr: u32, size: u32) -> Result<()> {
             println!("  0x{:04x}: {}", off, hex(&data[off..end]));
         }
         if data.len() > preview {
-            println!("  … ({} more bytes — paste into a hex tool to inspect)", data.len() - preview);
+            println!(
+                "  … ({} more bytes — paste into a hex tool to inspect)",
+                data.len() - preview
+            );
         }
         Ok(())
     })
@@ -2617,13 +2837,17 @@ fn tls_read_flash(partition: u8, addr: u32, size: u32) -> Result<()> {
 fn save_calib() -> Result<()> {
     use std::path::Path;
     use think_touch::capture::{
-        CaptureMode, average_interleaved, build_cmd_02, get_key_line,
-        process_calibration_results,
+        CaptureMode, average_interleaved, build_cmd_02, get_key_line, process_calibration_results,
     };
     use think_touch::sensor_types::{FM_3367_001, FM_3367_001_PROG};
     const KEY_CAL_LINE: u32 = 0x38;
     with_session(|chan, session| {
         println!("HANDSHAKE OK ✓");
+
+        let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
+
+        println!("factory_calibration_values: {} B", factory_cal_values.len());
+
         let mut buf: Vec<u8> = Vec::new();
         for iter in 1..=3 {
             let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &buf);
@@ -2635,8 +2859,8 @@ fn save_calib() -> Result<()> {
                 3,
                 224,
                 0,
-                &[],
-                &[],
+                &factory_cal_values,
+                &buf,
             )?;
             println!("[iter {iter}/3] cmd 0x02 {} bytes", pkt.len());
             let resp = session.cmd(chan, &pkt)?;
@@ -2646,8 +2870,7 @@ fn save_calib() -> Result<()> {
                 return Ok(());
             }
             let raw = chan.read_async()?;
-            let cooked =
-                average_interleaved(&raw, &FM_3367_001, 224, 3);
+            let cooked = average_interleaved(&raw, &FM_3367_001, 224, 3);
             process_calibration_results(&mut buf, &cooked, FM_3367_001.bytes_per_line as usize);
         }
 
@@ -2721,15 +2944,21 @@ fn pairing() -> Result<()> {
     let priv_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::PRIV_KEY)
-        .ok_or(Error::PairingMalformed { reason: "no priv-key block (id=0x04) on flash" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no priv-key block (id=0x04) on flash",
+        })?;
     let cert_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::TLS_CERT)
-        .ok_or(Error::PairingMalformed { reason: "no TLS cert block (id=0x03) on flash" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no TLS cert block (id=0x03) on flash",
+        })?;
     let ecdh_blob = blocks
         .iter()
         .find(|b| b.id == tls_flash_ids::ECDH_Q)
-        .ok_or(Error::PairingMalformed { reason: "no ECDH q block (id=0x06) on flash" })?;
+        .ok_or(Error::PairingMalformed {
+            reason: "no ECDH q block (id=0x06) on flash",
+        })?;
 
     let priv_key = pairing::decrypt_priv(&priv_blob.body, &keys)?;
     let q = pairing::parse_ecdh(&ecdh_blob.body)?;
@@ -2737,7 +2966,11 @@ fn pairing() -> Result<()> {
     println!();
     println!("Pairing OK — HMAC verifies with this host's GWK validation key.");
     println!();
-    println!("Client TLS cert:  {} bytes (prefix {}…)", cert_blob.body.len(), hex(&cert_blob.body[..8]));
+    println!(
+        "Client TLS cert:  {} bytes (prefix {}…)",
+        cert_blob.body.len(),
+        hex(&cert_blob.body[..8])
+    );
     println!();
     println!("Client priv key (P-256, big-endian):");
     println!("  x: {}", hex(&priv_key.x));
@@ -2763,7 +2996,11 @@ fn tls_hello() -> Result<()> {
     let pkt = tls::make_usb_tls_packet(&record);
 
     println!("client_random: {}", hex(&cr.0));
-    println!("\n> sending {} bytes ({} TLS record bytes)", pkt.len(), record.len());
+    println!(
+        "\n> sending {} bytes ({} TLS record bytes)",
+        pkt.len(),
+        record.len()
+    );
 
     // Note: USB cmd 0x44 replies with a raw TLS-record stream, *without* the
     // `<u16 status>` prefix that the cleartext command channel uses.
@@ -2830,9 +3067,16 @@ fn print_server_hello(body: &[u8]) {
     let session_id = &body[35..after_sid];
     let suite = u16::from_be_bytes([body[after_sid], body[after_sid + 1]]);
     let compression = body[after_sid + 2];
-    println!("      version       : {version} (raw {:02x} {:02x})", body[0], body[1]);
+    println!(
+        "      version       : {version} (raw {:02x} {:02x})",
+        body[0], body[1]
+    );
     println!("      server_random : {}", hex(server_random));
-    println!("      session_id    : {} ({} bytes)", hex(session_id), sid_len);
+    println!(
+        "      session_id    : {} ({} bytes)",
+        hex(session_id),
+        sid_len
+    );
     println!(
         "      cipher_suite  : 0x{suite:04x}{}",
         if suite == tls::SUITE_ECDH_ECDSA_AES256_CBC_SHA {
@@ -2870,7 +3114,11 @@ fn boot_info() -> Result<()> {
     // 1) Get Version
     let resp = chan.cmd(&[CMD_GET_VERSION])?;
     let (status, payload) = split_status(&resp)?;
-    println!("\n[01] Get Version → status={} ({} B payload)", fmt_status(status), payload.len());
+    println!(
+        "\n[01] Get Version → status={} ({} B payload)",
+        fmt_status(status),
+        payload.len()
+    );
     if status == 0 {
         let rom = RomInfo::parse(payload)?;
         println!(
@@ -2887,7 +3135,11 @@ fn boot_info() -> Result<()> {
     //    the raw bytes so the user can compare against other devices.
     let resp = chan.cmd(&[CMD_PROBE_19])?;
     let (status, payload) = split_status(&resp)?;
-    println!("\n[19] Probe         → status={} ({} B payload)", fmt_status(status), payload.len());
+    println!(
+        "\n[19] Probe         → status={} ({} B payload)",
+        fmt_status(status),
+        payload.len()
+    );
     if !payload.is_empty() {
         println!("     raw payload: {}", hex(payload));
     }
@@ -2901,7 +3153,11 @@ fn boot_info() -> Result<()> {
         }
         FwextState::Loaded(p) => {
             println!("     fwext loaded: version {}.{}", p.major, p.minor);
-            println!("     buildtime   : {} ({})", p.buildtime, format_unix(p.buildtime));
+            println!(
+                "     buildtime   : {} ({})",
+                p.buildtime,
+                format_unix(p.buildtime)
+            );
             println!("     modules     : {}", p.modules.len());
             for (i, m) in p.modules.iter().enumerate() {
                 println!(
@@ -2911,7 +3167,10 @@ fn boot_info() -> Result<()> {
             }
         }
         FwextState::OtherStatus { status, payload } => {
-            println!("     unexpected status {status:#06x} — raw payload: {}", hex(&payload));
+            println!(
+                "     unexpected status {status:#06x} — raw payload: {}",
+                hex(&payload)
+            );
         }
     }
 

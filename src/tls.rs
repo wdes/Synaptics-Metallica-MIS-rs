@@ -222,7 +222,10 @@ pub fn split_handshakes(buf: &[u8]) -> Result<Vec<HandshakeMessage<'_>>> {
         if p.len() < 4 + len {
             return Err(Error::ShortResponse);
         }
-        out.push(HandshakeMessage { hs_type: p[0], body: &p[4..4 + len] });
+        out.push(HandshakeMessage {
+            hs_type: p[0],
+            body: &p[4..4 + len],
+        });
         p = &p[4 + len..];
     }
     Ok(out)
@@ -268,7 +271,10 @@ mod tests {
     fn handshake_message_roundtrip() {
         let msg = make_handshake_message(HS_CLIENT_HELLO, b"abc");
         // 1 type byte + 3 length bytes + body
-        assert_eq!(msg, vec![HS_CLIENT_HELLO, 0x00, 0x00, 0x03, b'a', b'b', b'c']);
+        assert_eq!(
+            msg,
+            vec![HS_CLIENT_HELLO, 0x00, 0x00, 0x03, b'a', b'b', b'c']
+        );
         let parsed = split_handshakes(&msg).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].hs_type, HS_CLIENT_HELLO);
@@ -282,8 +288,7 @@ mod tests {
         // TLS record header — handshake, TLS 1.2, 61-byte body
         0x16, 0x03, 0x03, 0x00, 0x3d,
         // ServerHello message header — type 0x02, 45-byte body
-        0x02, 0x00, 0x00, 0x2d,
-        // ServerHello body
+        0x02, 0x00, 0x00, 0x2d, // ServerHello body
         0x03, 0x03, // version 3.3
         // server_random (32 B)
         0x0e, 0xec, 0xf2, 0x3d, 0x11, 0x8d, 0xcf, 0xea, 0xf0, 0x4e, 0x20, 0xee, 0xf7, 0xc3, 0x2f,
@@ -292,8 +297,7 @@ mod tests {
         // session_id length = 7, then ASCII "TLS" + first 4 of server_random
         0x07, 0x54, 0x4c, 0x53, 0x11, 0x8d, 0xcf, 0xea,
         // cipher suite TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA, no compression
-        0xc0, 0x05, 0x00,
-        // CertificateRequest — type 0x0d, 4-byte body
+        0xc0, 0x05, 0x00, // CertificateRequest — type 0x0d, 4-byte body
         0x0d, 0x00, 0x00, 0x04, 0x01, 0x40, 0x00, 0x00,
         // ServerHelloDone — type 0x0e, empty body
         0x0e, 0x00, 0x00, 0x00,

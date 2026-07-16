@@ -12,7 +12,6 @@
 // — Rust resolves identifiers regardless of position — and keeping it
 // this way avoids a 200-line cut-and-paste of public code.
 #![allow(clippy::items_after_test_module)]
-
 //
 //   * uunicorn/python-validity (MIT)        https://github.com/uunicorn/python-validity
 //   * nmikhailov/Validity90 specifications  https://github.com/nmikhailov/Validity90
@@ -286,7 +285,12 @@ impl PartitionInfo {
                 size: u32::from_le_bytes(m[8..12].try_into().unwrap()),
             });
         }
-        Ok(Self { major, minor, buildtime, modules })
+        Ok(Self {
+            major,
+            minor,
+            buildtime,
+            modules,
+        })
     }
 }
 
@@ -436,10 +440,15 @@ impl InterruptEvent {
     pub fn parse(bytes: &[u8]) -> Self {
         match bytes.first().copied() {
             Some(0x00) => Self::Start,
-            Some(0x02) => Self::FingerDetect { extra: bytes[1..].to_vec() },
+            Some(0x02) => Self::FingerDetect {
+                extra: bytes[1..].to_vec(),
+            },
             Some(0x03) => {
                 let flags = bytes.get(2).copied().unwrap_or(0);
-                Self::CaptureProgress { flags, extra: bytes[1..].to_vec() }
+                Self::CaptureProgress {
+                    flags,
+                    extra: bytes[1..].to_vec(),
+                }
             }
             _ => Self::Unknown(bytes.to_vec()),
         }
@@ -483,12 +492,7 @@ pub fn build_write_fw_signature(partition: u8, signature: &[u8]) -> Vec<u8> {
 /// `0x40 <u8 partition> 0x01 <u16=0> <u32 addr> <u32 size>`.
 ///
 /// Wire layout (response): `<u16 status> <u32 actual_size> <2 pad> <data...>`.
-pub fn read_flash(
-    chan: &mut Channel,
-    partition: u8,
-    addr: u32,
-    size: u32,
-) -> Result<Vec<u8>> {
+pub fn read_flash(chan: &mut Channel, partition: u8, addr: u32, size: u32) -> Result<Vec<u8>> {
     let mut req = Vec::with_capacity(13);
     req.push(CMD_READ_FLASH);
     req.push(partition);
@@ -554,7 +558,11 @@ pub fn parse_tls_flash(buf: &[u8]) -> Result<Vec<TlsFlashBlock>> {
         let mut sha = [0u8; 32];
         sha.copy_from_slice(&p[4..36]);
         let body = p[36..36 + sz].to_vec();
-        out.push(TlsFlashBlock { id, sha256: sha, body });
+        out.push(TlsFlashBlock {
+            id,
+            sha256: sha,
+            body,
+        });
         p = &p[36 + sz..];
     }
     Ok(out)
@@ -731,7 +739,10 @@ mod tests {
 
     #[test]
     fn rom_info_short_payload_errors() {
-        assert!(matches!(RomInfo::parse(&[0u8; 15]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            RomInfo::parse(&[0u8; 15]),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// Real reply from the user's device to cmd `0x43 02` over TLS (post-handshake).
@@ -741,14 +752,13 @@ mod tests {
         0x01, 0x00, 0x02, 0x00, 0x08, 0x00, // major=1, minor=2, modcnt=8
         0xe9, 0x83, 0x2e, 0x5e, // buildtime = 1580106729 (2020-01-27 06:32:09 UTC)
         // module table — 8 × 12 B
-        0x01, 0x00, 0x34, 0x46, 0x02, 0x00, 0x07, 0x00, 0xe0, 0x42, 0x00, 0x00,
-        0x01, 0x00, 0x84, 0x08, 0x01, 0x00, 0x07, 0x00, 0x80, 0x06, 0x00, 0x00,
-        0x02, 0x00, 0x84, 0x28, 0x03, 0x00, 0x12, 0x00, 0x40, 0x10, 0x00, 0x00,
-        0x02, 0x00, 0x76, 0x36, 0x01, 0x00, 0x0c, 0x00, 0x00, 0x0a, 0x00, 0x00,
-        0x01, 0x00, 0x86, 0x47, 0x00, 0x00, 0x01, 0x00, 0x50, 0x5a, 0x00, 0x00,
-        0x02, 0x00, 0x23, 0x77, 0x00, 0x00, 0x01, 0x00, 0xc0, 0x2f, 0x00, 0x00,
-        0x02, 0x00, 0x00, 0x37, 0x00, 0x00, 0x01, 0x00, 0xb0, 0x08, 0x02, 0x00,
-        0x01, 0x00, 0x25, 0x56, 0x00, 0x00, 0x01, 0x00, 0x60, 0x04, 0x00, 0x00,
+        0x01, 0x00, 0x34, 0x46, 0x02, 0x00, 0x07, 0x00, 0xe0, 0x42, 0x00, 0x00, 0x01, 0x00, 0x84,
+        0x08, 0x01, 0x00, 0x07, 0x00, 0x80, 0x06, 0x00, 0x00, 0x02, 0x00, 0x84, 0x28, 0x03, 0x00,
+        0x12, 0x00, 0x40, 0x10, 0x00, 0x00, 0x02, 0x00, 0x76, 0x36, 0x01, 0x00, 0x0c, 0x00, 0x00,
+        0x0a, 0x00, 0x00, 0x01, 0x00, 0x86, 0x47, 0x00, 0x00, 0x01, 0x00, 0x50, 0x5a, 0x00, 0x00,
+        0x02, 0x00, 0x23, 0x77, 0x00, 0x00, 0x01, 0x00, 0xc0, 0x2f, 0x00, 0x00, 0x02, 0x00, 0x00,
+        0x37, 0x00, 0x00, 0x01, 0x00, 0xb0, 0x08, 0x02, 0x00, 0x01, 0x00, 0x25, 0x56, 0x00, 0x00,
+        0x01, 0x00, 0x60, 0x04, 0x00, 0x00,
     ];
 
     #[test]
@@ -781,7 +791,10 @@ mod tests {
         // Header says 8 modules but only 7 present.
         let mut buf = REAL_FWEXT_REPLY[2..].to_vec();
         buf.truncate(2 + 0x0a + 7 * 12);
-        assert!(matches!(PartitionInfo::parse(&buf[2..]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            PartitionInfo::parse(&buf[2..]),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// Synthetic flash partition: two valid blocks plus the `0xffff`
@@ -900,13 +913,28 @@ mod tests {
     #[test]
     fn status_label_known_codes() {
         assert_eq!(status_label(0x0000), None);
-        assert_eq!(status_label(STATUS_NO_FW), Some("no firmware-extension loaded (clean slate)"));
+        assert_eq!(
+            status_label(STATUS_NO_FW),
+            Some("no firmware-extension loaded (clean slate)")
+        );
         assert_eq!(status_label(STATUS_NOT_FOUND), Some("record not found"));
-        assert_eq!(status_label(STATUS_NOTHING_TO_COMMIT), Some("nothing to commit (cleanup no-op)"));
-        assert_eq!(status_label(0x0007), Some("device-side scan / parameter error"));
-        assert_eq!(status_label(0x0316), Some("not a status word — looks like a TLS Alert (0x16 type misread as LE u16)"));
+        assert_eq!(
+            status_label(STATUS_NOTHING_TO_COMMIT),
+            Some("nothing to commit (cleanup no-op)")
+        );
+        assert_eq!(
+            status_label(0x0007),
+            Some("device-side scan / parameter error")
+        );
+        assert_eq!(
+            status_label(0x0316),
+            Some("not a status word — looks like a TLS Alert (0x16 type misread as LE u16)")
+        );
         // Unknown 0x04xx falls into the class-level bucket.
-        assert_eq!(status_label(0x04ae), Some("device-side error (0x04xx class)"));
+        assert_eq!(
+            status_label(0x04ae),
+            Some("device-side error (0x04xx class)")
+        );
         // Truly unknown.
         assert_eq!(status_label(0x9999), Some("unknown status code"));
     }
@@ -955,7 +983,10 @@ mod tests {
 
     #[test]
     fn capture_status_short_payload_errors() {
-        assert!(matches!(CaptureStatus::parse(&[0u8; 15]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            CaptureStatus::parse(&[0u8; 15]),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// `body_len < 12` is rejected — the parser refuses to invent fields
@@ -969,7 +1000,10 @@ mod tests {
             0x08, 0x00, 0x00, 0x00, // body_len = 8
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
-        assert!(matches!(CaptureStatus::parse(payload), Err(Error::ShortResponse)));
+        assert!(matches!(
+            CaptureStatus::parse(payload),
+            Err(Error::ShortResponse)
+        ));
     }
 
     /// `error_label` returns the generic-scan-error label for `0x07`
@@ -978,9 +1012,8 @@ mod tests {
     #[test]
     fn capture_status_error_label_generic_scan_error() {
         let payload: &[u8] = &[
-            0x0c, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x07, 0x00, 0x00, 0x00, // error = 0x00000007
+            0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00,
+            0x00, 0x00, // error = 0x00000007
         ];
         let s = CaptureStatus::parse(payload).unwrap();
         assert_eq!(s.error_label(), Some("generic scan error"));
@@ -991,9 +1024,8 @@ mod tests {
     #[test]
     fn capture_status_error_label_unknown_code() {
         let payload: &[u8] = &[
-            0x0c, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x99, 0xab, 0xcd, 0xef, // bogus, definitely not in our table
+            0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x99, 0xab,
+            0xcd, 0xef, // bogus, definitely not in our table
         ];
         let s = CaptureStatus::parse(payload).unwrap();
         assert!(matches!(s.error_label(), Some(label) if label.contains("python-validity")));
@@ -1017,7 +1049,10 @@ mod tests {
 
         // Capture progress without the done bit.
         let e = InterruptEvent::parse(&[0x03, 0x20, 0x03, 0x00, 0x00]);
-        assert!(matches!(e, InterruptEvent::CaptureProgress { flags: 0x03, .. }));
+        assert!(matches!(
+            e,
+            InterruptEvent::CaptureProgress { flags: 0x03, .. }
+        ));
         assert!(!e.capture_complete());
         assert_eq!(e.label(), "capture in progress");
 
@@ -1105,8 +1140,10 @@ mod tests {
         assert_eq!(u16::from_le_bytes([payload[0], payload[1]]), 0x0002);
         assert_eq!(u16::from_le_bytes([payload[2], payload[3]]), 0x0021);
         assert_eq!(u16::from_le_bytes([payload[4], payload[5]]), 0x0110);
-        assert_eq!(u32::from_le_bytes([payload[18], payload[19], payload[20], payload[21]]),
-            0xd54bf544);
+        assert_eq!(
+            u32::from_le_bytes([payload[18], payload[19], payload[20], payload[21]]),
+            0xd54bf544
+        );
         // Tail must be all zero.
         assert!(payload[22..].iter().all(|&b| b == 0));
     }
@@ -1127,10 +1164,9 @@ mod tests {
     #[test]
     fn template_db_partition_header_p70() {
         let header: [u8; 32] = [
-            0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01,
-            0xff, 0xff, 0xff, 0xff, 0x00, 0x01, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x08, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0x00, 0x01,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00,
+            0xff, 0xff, 0xff, 0xff,
         ];
         // Plausible field layout (best-effort; upstream doesn't decode):
         //   [0..2] u16 LE = 0x0001  → maybe schema version
@@ -1190,11 +1226,14 @@ mod tests {
             0x00, 0x00, // unknown1
             0x05, 0x00, // partition count = 5
             // partition table — 5 × 12 B
-            0x01, 0x04, 0x07, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, // cert store
+            0x01, 0x04, 0x07, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x00,
+            0x00, // cert store
             0x02, 0x01, 0x02, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0xe0, 0x03, 0x00, // xpfwext
             0x05, 0x05, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, // unknown
-            0x06, 0x06, 0x03, 0x00, 0x00, 0x80, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, // calibration
-            0x04, 0x03, 0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x08, 0x00, // template DB
+            0x06, 0x06, 0x03, 0x00, 0x00, 0x80, 0x04, 0x00, 0x00, 0x80, 0x00,
+            0x00, // calibration
+            0x04, 0x03, 0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x08,
+            0x00, // template DB
         ];
         let l = parse_flash_info(payload).unwrap();
         assert_eq!(l.ic.jid0, 0x00ef);
@@ -1222,7 +1261,10 @@ mod tests {
 
     #[test]
     fn parse_flash_info_short_header_errors() {
-        assert!(matches!(parse_flash_info(&[0u8; 13]), Err(Error::ShortResponse)));
+        assert!(matches!(
+            parse_flash_info(&[0u8; 13]),
+            Err(Error::ShortResponse)
+        ));
     }
 
     #[test]
@@ -1376,7 +1418,15 @@ pub fn parse_flash_info(payload: &[u8]) -> Result<FlashLayout> {
             size: u32::from_le_bytes(payload[off + 8..off + 12].try_into().unwrap()),
         });
     }
-    Ok(FlashLayout { ic: FlashIc { jid0, jid1, blocks, block_size }, partitions })
+    Ok(FlashLayout {
+        ic: FlashIc {
+            jid0,
+            jid1,
+            blocks,
+            block_size,
+        },
+        partitions,
+    })
 }
 
 /// Convenience: send `0x43 <partition>` and decode the result into a [`FwextState`].
@@ -1386,7 +1436,10 @@ pub fn query_partition(chan: &mut Channel, partition: u8) -> Result<FwextState> 
     Ok(match status {
         STATUS_NO_FW => FwextState::CleanSlate,
         0 => FwextState::Loaded(PartitionInfo::parse(payload)?),
-        other => FwextState::OtherStatus { status: other, payload: payload.to_vec() },
+        other => FwextState::OtherStatus {
+            status: other,
+            payload: payload.to_vec(),
+        },
     })
 }
 
@@ -1413,6 +1466,13 @@ impl RomInfo {
         let product = payload[11];
         // payload[12..15] is padding
         let u1 = payload[15];
-        Ok(Self { timestamp, build, major, minor, product, u1 })
+        Ok(Self {
+            timestamp,
+            build,
+            major,
+            minor,
+            product,
+            u1,
+        })
     }
 }

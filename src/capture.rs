@@ -107,7 +107,11 @@ pub struct Insn {
 /// match for known opcodes.
 pub fn decode_insn(bytes: &[u8]) -> Option<Insn> {
     let b = bytes.first().copied()?;
-    let mut ins = Insn { opcode: 0, length: 0, operands: [0; 3] };
+    let mut ins = Insn {
+        opcode: 0,
+        length: 0,
+        operands: [0; 3],
+    };
     if b <= 4 {
         ins.opcode = b;
         ins.length = 1;
@@ -286,7 +290,10 @@ pub mod tail_chunks {
     use crate::chunks::Chunk;
 
     pub fn reply_config() -> Chunk {
-        Chunk { kind: 0x0017, body: Vec::new() }
+        Chunk {
+            kind: 0x0017,
+            body: Vec::new(),
+        }
     }
 
     /// Identify-mode 0x4e magic — type-1 device variant.
@@ -409,11 +416,10 @@ pub mod tail_chunks {
 /// during calibration; pass `&[]` before the device has ever
 /// calibrated (CALIBRATE iteration 0).
 ///
-/// For modes other than [`CaptureMode::Calibrate`] this also appends
-/// the `0x44 / 0x30 / 0x43` chunks that bake the calibration data
-/// into the program — without these the matcher fires a noise-detect
-/// sentinel and aborts (this was the root cause of the phantom
-/// finger-detect on the user's P70).
+/// Appends the `0x44 / 0x30 / 0x43` line-update bundle for every
+/// capture mode. During initial CALIBRATE passes, `calib_data` is
+/// empty, so only the calibration-blob and factory-calibration lines
+/// are included. Later passes additionally include per-line offsets.
 pub fn line_update_type_1(
     mode: CaptureMode,
     chunks: &mut Vec<Chunk>,
@@ -434,7 +440,8 @@ pub fn line_update_type_1(
             // Keep the patched timeslot for the line-update anchors.
             patched_tst = tst.clone();
             // body = key_line || tst[line_width..]
-            let mut new_body = Vec::with_capacity(line_width + tst.len().saturating_sub(line_width));
+            let mut new_body =
+                Vec::with_capacity(line_width + tst.len().saturating_sub(line_width));
             new_body.extend_from_slice(key_line);
             if tst.len() > line_width {
                 new_body.extend_from_slice(&tst[line_width..]);
@@ -458,16 +465,11 @@ pub fn line_update_type_1(
         CaptureMode::Calibrate => {}
     }
 
-    // CALIBRATE on this device works without the line-update bundle —
-    // we send raw scan requests during the initial 3-iteration
-    // baseline. IDENTIFY/ENROLL must include the bundle or the
-    // matcher reads sensor noise into the wrong bins.
-    if mode == CaptureMode::Calibrate {
-        return;
-    }
-
     // ---- 0x44 Interleave (constant: <u32 1>) ----
-    chunks.push(Chunk { kind: 0x0044, body: 1u32.to_le_bytes().to_vec() });
+    chunks.push(Chunk {
+        kind: 0x0044,
+        body: 1u32.to_le_bytes().to_vec(),
+    });
 
     // ---- Build Lines ----
     let mut lines: Vec<Line> = Vec::new();
@@ -513,8 +515,7 @@ pub fn line_update_type_1(
     // With our P70 sensor: bytes_per_calibration_line = 13440 / 112 =
     // 120, so each Line carries 112 × 4 = 448 bytes.
     if !calib_data.is_empty() && type_info.lines_per_calibration_data > 0 {
-        let bytes_per_calib_line =
-            calib_data.len() / type_info.lines_per_calibration_data as usize;
+        let bytes_per_calib_line = calib_data.len() / type_info.lines_per_calibration_data as usize;
         // Outer loop: 28 iterations (0, 4, …, 108).
         for i in (0u32..112).step_by(4) {
             let mut data = Vec::with_capacity(112 * 4);
@@ -555,7 +556,10 @@ pub fn line_update_type_1(
             line_update.extend_from_slice(&l.data);
         }
     }
-    chunks.push(Chunk { kind: 0x0030, body: line_update });
+    chunks.push(Chunk {
+        kind: 0x0030,
+        body: line_update,
+    });
 
     // ---- 0x43 Line Update Transform ----
     let mut update_transform = Vec::new();
@@ -567,7 +571,10 @@ pub fn line_update_type_1(
             update_transform.extend_from_slice(&l.data);
         }
     }
-    chunks.push(Chunk { kind: 0x0043, body: update_transform });
+    chunks.push(Chunk {
+        kind: 0x0043,
+        body: update_transform,
+    });
 }
 
 /// Strip the 8-byte per-line header from each scan line in `raw`,
@@ -681,7 +688,9 @@ pub fn parse_calibration(partition6: &[u8]) -> Result<Vec<u8>> {
     }
     let magic = u16::from_le_bytes([partition6[0], partition6[1]]);
     if magic != 0x5002 {
-        return Err(Error::PairingMalformed { reason: "calibration magic is not 0x5002" });
+        return Err(Error::PairingMalformed {
+            reason: "calibration magic is not 0x5002",
+        });
     }
     let raw_len = u16::from_le_bytes([partition6[0x44], partition6[0x45]]) as usize;
     let start = 0x46;
@@ -724,11 +733,7 @@ pub fn add_signed(l: u8, r: u8) -> u8 {
 /// (first 8 bytes) are preserved untouched.
 ///
 /// Mirrors `sensor.py:process_calibration_results`.
-pub fn process_calibration_results(
-    calib_data: &mut Vec<u8>,
-    cooked: &[u8],
-    bytes_per_line: usize,
-) {
+pub fn process_calibration_results(calib_data: &mut Vec<u8>, cooked: &[u8], bytes_per_line: usize) {
     // Build the scaled frame: keep header bytes, scale every pixel.
     let mut scaled = Vec::with_capacity(cooked.len());
     for line in cooked.chunks(bytes_per_line) {
@@ -752,7 +757,10 @@ pub fn process_calibration_results(
     {
         let header_len = old_line.len().min(8);
         combined.extend_from_slice(&old_line[..header_len]);
-        for (l, r) in old_line[header_len..].iter().zip(new_line[header_len..].iter()) {
+        for (l, r) in old_line[header_len..]
+            .iter()
+            .zip(new_line[header_len..].iter())
+        {
             combined.push(add_signed(*l, *r));
         }
     }
@@ -781,7 +789,11 @@ pub fn average_interleaved(
 
     // Skip the first frame, work on the second one only — that's what
     // upstream does when input_frames > 1.
-    let base_address = if calibration_frames > 1 { frame_size } else { 0 };
+    let base_address = if calibration_frames > 1 {
+        frame_size
+    } else {
+        0
+    };
     let frame = &raw[base_address..base_address + frame_size];
 
     // Split into groups of `interleave_lines` lines.
@@ -941,7 +953,11 @@ pub fn line_update_type_2(
 
     // 3) Build line-update chunk. We need the post-patch tst body to
     //    locate the call/regwrite anchors. Find the (now updated) 0x34.
-    let tst = chunks.iter().find(|c| c.kind == 0x0034).map(|c| c.body.clone()).unwrap_or_default();
+    let tst = chunks
+        .iter()
+        .find(|c| c.kind == 0x0034)
+        .map(|c| c.body.clone())
+        .unwrap_or_default();
     let mut lines: Vec<Line> = Vec::with_capacity(3);
 
     // Line 1: calibration_blob anchored at 2nd Enable Rx (opcode 6).
@@ -1084,7 +1100,10 @@ mod tests {
     /// Zero opcode advances by one byte; `0x07` advances by two.
     #[test]
     fn patch_timeslot_handles_filler_opcodes() {
-        let input = [0x00, 0x07, 0xAA, 0x10, 0x09, 0x02, 0xff /* should stop here */, 0xff];
+        let input = [
+            0x00, 0x07, 0xAA, 0x10, 0x09, 0x02, 0xff, /* should stop here */
+            0xff,
+        ];
         let out = patch_timeslot_table(&input, false, 3);
         // Only the 0x10 triplet is rewritten — addr unchanged because
         // inc_address=false, val 2 → 6.
@@ -1111,7 +1130,10 @@ mod tests {
         // Mark the row we expect to extract (key line 2 for this test).
         let key_line = 2usize;
         let row_off = 8 + bytes_per_line * key_line;
-        for (i, b) in data[row_off..row_off + bytes_per_line].iter_mut().enumerate() {
+        for (i, b) in data[row_off..row_off + bytes_per_line]
+            .iter_mut()
+            .enumerate()
+        {
             *b = if i == 3 { 5 } else { (i as u8) | 0x80 };
         }
         let key = get_key_line(&FM_3367_001, key_line as u32, &data);
@@ -1185,7 +1207,9 @@ mod tests {
         //   [0x40..0x43] Write Register at 0x8000203c with value 0x77
         //   [0x43..0x44] End (1)
         let mut prog = vec![0u8; 0x44];
-        prog[0] = 0x10; prog[1] = 0x10; prog[2] = 0x05; // Call
+        prog[0] = 0x10;
+        prog[1] = 0x10;
+        prog[2] = 0x05; // Call
         prog[3] = 4; // End of Data
         prog[0x40] = 0x4f; // Write Register at 0x8000203c
         prog[0x41] = 0x77; // value byte
@@ -1193,7 +1217,10 @@ mod tests {
         prog[0x43] = 1; // End of Table
 
         let out = patch_timeslot_again(&prog, 0xAB);
-        assert_eq!(out[0x41], 0xAB, "value byte must be replaced with subst_value");
+        assert_eq!(
+            out[0x41], 0xAB,
+            "value byte must be replaced with subst_value"
+        );
         // Other bytes unchanged.
         assert_eq!(out[0x40], 0x4f);
         assert_eq!(out[0x42], 0x00);
@@ -1208,8 +1235,14 @@ mod tests {
         use crate::chunks::Chunk;
         use crate::sensor_types::FM_3367_001;
         let mut chunks = vec![
-            Chunk { kind: 0x0034, body: vec![0xAAu8; 200] },
-            Chunk { kind: 0x0020, body: vec![0u8; 8] },
+            Chunk {
+                kind: 0x0034,
+                body: vec![0xAAu8; 200],
+            },
+            Chunk {
+                kind: 0x0020,
+                body: vec![0u8; 8],
+            },
         ];
         let key_line = vec![0x55u8; 112];
         line_update_type_1(
@@ -1236,7 +1269,10 @@ mod tests {
     fn line_update_type_1_identify_mode_adds_tail() {
         use crate::chunks::Chunk;
         use crate::sensor_types::FM_3367_001;
-        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 130] }];
+        let mut chunks = vec![Chunk {
+            kind: 0x0034,
+            body: vec![0u8; 130],
+        }];
         let key_line = vec![0u8; 112];
         line_update_type_1(
             CaptureMode::Identify,
@@ -1303,7 +1339,7 @@ mod tests {
         )
         .unwrap();
         // Total length is fully determined by the inputs.
-        assert_eq!(pkt.len(), 657);
+        assert_eq!(pkt.len(), 813);
         // Header (5 bytes) + first chunk-list bytes are deterministic.
         // First 32 bytes lock in the 5-byte cmd header, the empty 0x23
         // chunk, the 0x20 chunk's body, and the start of the 0x32 chunk.
@@ -1397,8 +1433,7 @@ mod tests {
         //     already dword-aligned. 0x43 then totals 4 + 112 + 4 + 72 = 192.
         let key_line = vec![0u8; FM_3367_001.line_width as usize];
         let calib_data: Vec<u8> = (0..13440u32).map(|i| (i & 0xff) as u8).collect();
-        let factory_cal_values: Vec<u8> =
-            (0..115u32).map(|i| 0x70u8 + (i % 31) as u8).collect();
+        let factory_cal_values: Vec<u8> = (0..115u32).map(|i| 0x70u8 + (i % 31) as u8).collect();
 
         let pkt = build_cmd_02(
             CaptureMode::Identify,
@@ -1444,15 +1479,20 @@ mod tests {
         // 0x30 body header: <u32 line_count=30> + 30× (u32 mask, u32 flags)
         // + 28 × 448 bytes of slab data = 4 + 240 + 12544 = 12788.
         let line_count = u32::from_le_bytes(chunks[14].body[0..4].try_into().unwrap());
-        assert_eq!(line_count, 30, "expected 2 transform lines + 28 calib slab lines");
+        assert_eq!(
+            line_count, 30,
+            "expected 2 transform lines + 28 calib slab lines"
+        );
 
         // 0x43 body starts with the calibration_blob's first transform
         // header: <v0=0xf, v1=0, v2=0, calibration_blob[112]>.
         assert_eq!(chunks[15].body[0], 0x0f);
         assert_eq!(chunks[15].body[1], 0x00);
-        assert_eq!(&chunks[15].body[4..4 + FM_3367_001.calibration_blob.len()],
-                   FM_3367_001.calibration_blob,
-                   "calibration_blob copied into 0x43 chunk");
+        assert_eq!(
+            &chunks[15].body[4..4 + FM_3367_001.calibration_blob.len()],
+            FM_3367_001.calibration_blob,
+            "calibration_blob copied into 0x43 chunk"
+        );
     }
 
     /// With zero calib_data, the 0x30 chunk shrinks: only the 2
@@ -1478,7 +1518,10 @@ mod tests {
         let chunks = split_chunks_inner(&pkt[5..]).unwrap();
         let line_update = chunks.iter().find(|c| c.kind == 0x0030).unwrap();
         assert_eq!(line_update.body.len(), 4 + 16);
-        assert_eq!(u32::from_le_bytes(line_update.body[0..4].try_into().unwrap()), 2);
+        assert_eq!(
+            u32::from_le_bytes(line_update.body[0..4].try_into().unwrap()),
+            2
+        );
     }
 
     /// Cross-check the chunk skeleton (header bytes, types, sizes)
@@ -1531,7 +1574,10 @@ mod tests {
         }
         let subst = found_subst.expect("brute-force found a subst that matches");
         // Should be the user's known subst_value 0x8c.
-        assert_eq!(subst, 0x8c, "P70 subst is 0x8c per `factory-calibration` output");
+        assert_eq!(
+            subst, 0x8c,
+            "P70 subst is 0x8c per `factory-calibration` output"
+        );
 
         // Now build with the right inputs and byte-compare chunks 0-12.
         let pkt = build_cmd_02(
@@ -1643,21 +1689,52 @@ mod tests {
                 pv_chunks[i].kind,
             );
         }
-        assert_eq!(our_chunks[13].body, pv_chunks[13].body, "ENROLL 0x44 interleave");
+        assert_eq!(
+            our_chunks[13].body, pv_chunks[13].body,
+            "ENROLL 0x44 interleave"
+        );
     }
 
     /// `Line::goes_to_update_transform` reads the 4-bit field at
     /// position `[20..24)` of `flags`. `<= 1` → 0x30, `> 1` → 0x43.
     #[test]
     fn line_classification_by_flag_bits() {
-        let l = Line { mask: 0, flags: 0, data: vec![], v0: 0, v1: 0, v2: 0 };
+        let l = Line {
+            mask: 0,
+            flags: 0,
+            data: vec![],
+            v0: 0,
+            v1: 0,
+            v2: 0,
+        };
         assert!(!l.goes_to_update_transform());
-        let l = Line { mask: 0, flags: 1u32 << 0x14, data: vec![], v0: 0, v1: 0, v2: 0 };
+        let l = Line {
+            mask: 0,
+            flags: 1u32 << 0x14,
+            data: vec![],
+            v0: 0,
+            v1: 0,
+            v2: 0,
+        };
         assert!(!l.goes_to_update_transform());
         // Boundary: cnt=2 → goes to 0x43.
-        let l = Line { mask: 0, flags: 2u32 << 0x14, data: vec![], v0: 0, v1: 0, v2: 0 };
+        let l = Line {
+            mask: 0,
+            flags: 2u32 << 0x14,
+            data: vec![],
+            v0: 0,
+            v1: 0,
+            v2: 0,
+        };
         assert!(l.goes_to_update_transform());
-        let l = Line { mask: 0, flags: 0xfu32 << 0x14, data: vec![], v0: 0, v1: 0, v2: 0 };
+        let l = Line {
+            mask: 0,
+            flags: 0xfu32 << 0x14,
+            data: vec![],
+            v0: 0,
+            v1: 0,
+            v2: 0,
+        };
         assert!(l.goes_to_update_transform());
     }
 
@@ -1766,9 +1843,19 @@ mod tests {
 
     #[test]
     fn line_header_looks_valid_only_for_correct_magic() {
-        let bad = LineHeader { magic: [0x00, 0x00], line_index: 1, frame_index: 1, counter: 0 };
+        let bad = LineHeader {
+            magic: [0x00, 0x00],
+            line_index: 1,
+            frame_index: 1,
+            counter: 0,
+        };
         assert!(!bad.looks_valid());
-        let good = LineHeader { magic: [0x01, 0xfe], line_index: 1, frame_index: 1, counter: 0 };
+        let good = LineHeader {
+            magic: [0x01, 0xfe],
+            line_index: 1,
+            frame_index: 1,
+            counter: 0,
+        };
         assert!(good.looks_valid());
     }
 
@@ -1856,7 +1943,11 @@ mod tests {
         assert_eq!(pgm.len() - pixel_start, 24);
         // Pixel data: 0x10×8, 0x20×8, 0x30×8.
         assert!(pgm[pixel_start..pixel_start + 8].iter().all(|&b| b == 0x10));
-        assert!(pgm[pixel_start + 8..pixel_start + 16].iter().all(|&b| b == 0x20));
+        assert!(
+            pgm[pixel_start + 8..pixel_start + 16]
+                .iter()
+                .all(|&b| b == 0x20)
+        );
         assert!(pgm[pixel_start + 16..].iter().all(|&b| b == 0x30));
     }
 
@@ -1919,7 +2010,11 @@ mod tests {
         }
         let cooked = average_interleaved(&raw, &FM_3367_001, lines_per_frame, 2);
         // Every byte should be the integer average of 0x40 and 0x80 = 0x60.
-        assert!(cooked.iter().all(|&b| b == 0x60), "expected all 0x60, got {:?}", &cooked[..4]);
+        assert!(
+            cooked.iter().all(|&b| b == 0x60),
+            "expected all 0x60, got {:?}",
+            &cooked[..4]
+        );
     }
 
     /// `scale(0x80) = 0`, and the formula `(x-0x80)*10/0x22` lands
@@ -2043,7 +2138,14 @@ mod tests {
     #[test]
     fn line_pad_to_dword() {
         for (input_len, expected) in [(0usize, 0), (1, 4), (2, 4), (3, 4), (4, 4), (5, 8)] {
-            let mut line = Line { mask: 0, flags: 0, data: vec![0xAA; input_len], v0: 0, v1: 0, v2: 0 };
+            let mut line = Line {
+                mask: 0,
+                flags: 0,
+                data: vec![0xAA; input_len],
+                v0: 0,
+                v1: 0,
+                v2: 0,
+            };
             line.pad_to_dword();
             assert_eq!(line.data.len(), expected);
         }
@@ -2055,7 +2157,10 @@ mod tests {
     #[test]
     fn line_update_type_2_calibrate_appends_minimum_tail() {
         use crate::sensor_types::FM_3367_001;
-        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 200] }];
+        let mut chunks = vec![Chunk {
+            kind: 0x0034,
+            body: vec![0u8; 200],
+        }];
         line_update_type_2(
             CaptureMode::Calibrate,
             &mut chunks,
@@ -2076,7 +2181,10 @@ mod tests {
     #[test]
     fn line_update_type_2_identify_adds_4e_2e_type2() {
         use crate::sensor_types::FM_3367_001;
-        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 200] }];
+        let mut chunks = vec![Chunk {
+            kind: 0x0034,
+            body: vec![0u8; 200],
+        }];
         line_update_type_2(
             CaptureMode::Identify,
             &mut chunks,
@@ -2085,7 +2193,10 @@ mod tests {
             &[0x20u8; 112],
             0,
         );
-        let id4e = chunks.iter().find(|c| c.kind == 0x004e).expect("0x4e missing");
+        let id4e = chunks
+            .iter()
+            .find(|c| c.kind == 0x004e)
+            .expect("0x4e missing");
         // Type-2 0x4e is 40 bytes and starts with the same magic.
         assert_eq!(id4e.body.len(), 40);
         assert_eq!(id4e.body[0], 0xfb);
@@ -2097,7 +2208,10 @@ mod tests {
     #[test]
     fn line_update_type_2_enroll_adds_26_2e_type2() {
         use crate::sensor_types::FM_3367_001;
-        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 200] }];
+        let mut chunks = vec![Chunk {
+            kind: 0x0034,
+            body: vec![0u8; 200],
+        }];
         line_update_type_2(
             CaptureMode::Enroll,
             &mut chunks,
@@ -2107,7 +2221,10 @@ mod tests {
             0,
         );
         assert!(chunks.iter().any(|c| c.kind == 0x0026));
-        let enr2e = chunks.iter().find(|c| c.kind == 0x002e).expect("0x2e missing");
+        let enr2e = chunks
+            .iter()
+            .find(|c| c.kind == 0x002e)
+            .expect("0x2e missing");
         // Type-2 enroll 0x2e differs from identify in byte 4: `23` vs `02`.
         assert_eq!(enr2e.body[4], 0x23);
     }
@@ -2183,7 +2300,10 @@ mod tests {
     fn line_update_type_1_enroll_mode_tail() {
         use crate::chunks::Chunk;
         use crate::sensor_types::FM_3367_001;
-        let mut chunks = vec![Chunk { kind: 0x0034, body: vec![0u8; 130] }];
+        let mut chunks = vec![Chunk {
+            kind: 0x0034,
+            body: vec![0u8; 130],
+        }];
         let key_line = vec![0u8; 112];
         line_update_type_1(
             CaptureMode::Enroll,

@@ -24,7 +24,10 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new(kind: u16, body: impl Into<Vec<u8>>) -> Self {
-        Self { kind, body: body.into() }
+        Self {
+            kind,
+            body: body.into(),
+        }
     }
 }
 
@@ -41,7 +44,10 @@ pub fn split(buf: &[u8]) -> Result<Vec<Chunk>> {
         if p.len() < 4 + size {
             return Err(Error::ShortResponse);
         }
-        out.push(Chunk { kind, body: p[4..4 + size].to_vec() });
+        out.push(Chunk {
+            kind,
+            body: p[4..4 + size].to_vec(),
+        });
         p = &p[4 + size..];
     }
     Ok(out)
@@ -66,7 +72,10 @@ pub fn upsert(chunks: &mut Vec<Chunk>, kind: u16, body: impl Into<Vec<u8>>) -> &
         chunks[i].body = body.into();
         &mut chunks[i]
     } else {
-        chunks.push(Chunk { kind, body: body.into() });
+        chunks.push(Chunk {
+            kind,
+            body: body.into(),
+        });
         chunks.last_mut().unwrap()
     }
 }
@@ -160,10 +169,7 @@ mod tests {
     /// stay untouched. We don't dedup — that's the caller's job.
     #[test]
     fn upsert_only_replaces_first_match() {
-        let mut cs = vec![
-            Chunk::new(0x0020, vec![1]),
-            Chunk::new(0x0020, vec![2]),
-        ];
+        let mut cs = vec![Chunk::new(0x0020, vec![1]), Chunk::new(0x0020, vec![2])];
         upsert(&mut cs, 0x0020, vec![0xff]);
         assert_eq!(cs[0].body, vec![0xff]);
         assert_eq!(cs[1].body, vec![2], "second 0x0020 chunk preserved");
