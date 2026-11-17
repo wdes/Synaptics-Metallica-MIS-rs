@@ -458,13 +458,13 @@ pub fn line_update_type_1(
         CaptureMode::Calibrate => {}
     }
 
-    // CALIBRATE on this device works without the line-update bundle —
-    // we send raw scan requests during the initial 3-iteration
-    // baseline. IDENTIFY/ENROLL must include the bundle or the
-    // matcher reads sensor noise into the wrong bins.
-    if mode == CaptureMode::Calibrate {
-        return;
-    }
+    // NOTE: python-validity appends the interleave + line-update bundle
+    // in EVERY mode, CALIBRATE included: each calibration pass carries
+    // the bitpacked factory values and the calib_data accumulated so far,
+    // so successive passes refine each other. An earlier version skipped
+    // it for CALIBRATE; the sensor still answered, but the resulting
+    // calib_data was wrong enough that a ThinkPad P52 reported a finger
+    // the instant every IDENTIFY/ENROLL scan started.
 
     // ---- 0x44 Interleave (constant: <u32 1>) ----
     chunks.push(Chunk { kind: 0x0044, body: 1u32.to_le_bytes().to_vec() });
@@ -1305,8 +1305,9 @@ mod tests {
             &[],
         )
         .unwrap();
-        // Total length is fully determined by the inputs.
-        assert_eq!(pkt.len(), 657);
+        // Total length is fully determined by the inputs. (657 before the
+        // line-update bundle was added to CALIBRATE, matching python-validity.)
+        assert_eq!(pkt.len(), 813);
         // Header (5 bytes) + first chunk-list bytes are deterministic.
         // First 32 bytes lock in the 5-byte cmd header, the empty 0x23
         // chunk, the 0x20 chunk's body, and the start of the 0x32 chunk.
@@ -1314,6 +1315,34 @@ mod tests {
             hex_dbg(&pkt[..32]),
             "027800a102230000002000080000200080000001003200740000000080202004",
         );
+    }
+
+    /// Regression vectors from a real ThinkPad P52 (FM-3367-001): SHA-256
+    /// of the CALIBRATE (first pass), IDENTIFY and ENROLL cmd-02 programs
+    /// python-validity builds from that device's factory values. The first
+    /// pass is the one that matters most: it was 657 bytes here (no
+    /// factory-value transform) vs python-validity's 885.
+    #[test]
+    fn build_cmd_02_matches_python_validity_p52() {
+        use crate::sensor_types::{FM_3367_001, FM_3367_001_PROG};
+        use sha2::{Digest, Sha256};
+        let fcv = hex_to_bytes("7d7f7c777e7b737a817e7e7a76857f87878384888887888a8a898b8c8b85878b8689878689898586837c898b8288888a8d8b8f908e85858c8a8c8f8f8a858f8592928b8e918d8e8e8a8f8e8c8e908e8d898987818b8b818687858187888c8e81808689898a87818379797d7b74787d7e");
+        let key_line = get_key_line(&FM_3367_001, 0x38, &[]);
+        let pkt = build_cmd_02(
+            CaptureMode::Calibrate,
+            &FM_3367_001_PROG,
+            &FM_3367_001,
+            &key_line,
+            3,
+            224,
+            0,
+            &fcv,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(pkt.len(), 885);
+        let digest: String = Sha256::digest(&pkt).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(digest, "ff16c5a01df067b78fa3e13b2dbc36a637c97c39658732c5e8af013d799b5dde");
     }
 
     fn hex_dbg(b: &[u8]) -> String {

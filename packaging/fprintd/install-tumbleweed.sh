@@ -53,6 +53,14 @@ else
     echo "  (not zypper-based: make sure your distro's fprintd + its PAM module are installed)"
 fi
 
+# Calibration baselines saved by older builds were computed without the
+# factory-value transform and make the sensor report phantom touches.
+# Drop it; the daemon recalibrates (python-validity style) on first use.
+if [ -f /var/lib/synaptics-metallica-mis/calib_data ]; then
+    echo "→ removing old calibration baseline (it will be rebuilt on first use)"
+    rm -f /var/lib/synaptics-metallica-mis/calib_data
+fi
+
 echo "→ installing daemon to $BIN_DST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DST"
 

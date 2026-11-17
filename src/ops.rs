@@ -302,7 +302,9 @@ impl Sensor {
 
     // ───────────────────────── capture setup ─────────────────────────
 
-    fn calibrate(&mut self) -> Result<Vec<u8>> {
+    /// Three refining calibration passes, python-validity style: every
+    /// pass carries the factory values and the calib_data so far.
+    fn calibrate(&mut self, factory_cal_values: &[u8]) -> Result<Vec<u8>> {
         let mut buf: Vec<u8> = Vec::new();
         for _ in 0..CALIBRATION_ITERATIONS {
             let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &buf);
@@ -314,8 +316,8 @@ impl Sensor {
                 CALIBRATION_FRAMES,
                 LINES_PER_FRAME,
                 0,
-                &[],
-                &[],
+                factory_cal_values,
+                &buf,
             )?;
             self.cmd_ok(&pkt, "calibrate rejected")?;
             let raw = self.chan.read_async()?;
@@ -366,6 +368,7 @@ impl Sensor {
     /// Load the saved calibration baseline (running and saving a fresh
     /// one if none exists yet) and fetch the factory values.
     pub fn capture_params(&mut self) -> Result<CaptureParams> {
+        let factory_cal_values = self.factory_calibration_values()?;
         let path = Path::new(cache::CALIB_DATA_PATH);
         let calib_data = match cache::load_calib_data(path) {
             Ok(d) if !d.is_empty() => {
@@ -374,14 +377,13 @@ impl Sensor {
             }
             _ => {
                 log::info!("no saved calibration; calibrating now");
-                let d = self.calibrate()?;
+                let d = self.calibrate(&factory_cal_values)?;
                 if let Err(e) = cache::save_calib_data(path, &d) {
                     log::warn!("could not save calibration: {e}");
                 }
                 d
             }
         };
-        let factory_cal_values = self.factory_calibration_values()?;
         let subst_value = *factory_cal_values
             .get(KEY_CAL_LINE as usize)
             .ok_or(dev_err("factory_calibration_values too short"))?;
