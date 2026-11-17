@@ -519,12 +519,11 @@ impl Sensor {
         log::info!("matcher verdict {}", hex(&verdict));
         if verdict.first() != Some(&0x03) {
             let _ = self.cmd(&[0x62, 0, 0, 0, 0]);
-            // 0x04 = matcher discarded the scan, 0x05 = no DB match.
-            return Ok(if verdict.first() == Some(&0x04) {
-                IdentifyOutcome::RetryScan
-            } else {
-                IdentifyOutcome::NoMatch
-            });
+            // Anything but 0x03 is "finger not recognized", exactly as in
+            // python-validity's match_finger(). (0x05..04b3 = no records at
+            // all; 0x04..0001 = good scan that matched no stored print.)
+            // Treating 0x04 as retry made pam_fprintd loop on "scan again".
+            return Ok(IdentifyOutcome::NoMatch);
         }
 
         let resp = self.cmd(&[0x60, 0x00, 0x00, 0x00, 0x00])?;
