@@ -123,7 +123,7 @@ mod tests {
         let cal = FM_3367_001.calibration_blob;
         assert_eq!(cal.len(), FM_3367_001.lines_per_calibration_data as usize);
         for w in cal.windows(2) {
-            assert!(w[0] >= w[1], "calibration curve must be decreasing: {:?}", &w);
+            assert!(w[0] >= w[1], "calibration curve must be decreasing: {:?}", w);
         }
         assert_eq!(cal[0], 0x9b);
         assert_eq!(*cal.last().unwrap(), 0x06);

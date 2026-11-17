@@ -2077,6 +2077,34 @@ mod tests {
         );
     }
 
+    /// The P70 reference capture's own `0x43` chunk: decode its packed
+    /// factory-calibration line the way python-validity encodes it (value
+    /// `i` in bits `i*u..i*u+u`, little-endian) and re-pack it. The old
+    /// reversed packing produced 68 of these 72 bytes differently, i.e. it
+    /// was wrong on the P70 as well; the byte-match tests above skip
+    /// chunks 13-15, so it went unnoticed.
+    #[test]
+    fn bitpack_roundtrips_p70_capture_0x43() {
+        use crate::chunks::split as split_chunks_inner;
+        const PV_HEX: &str = include_str!("../scripts/captured/pv_cmd02_identify.hex");
+        let pv = hex_to_bytes(PV_HEX);
+        let chunks = split_chunks_inner(&pv[5..]).unwrap();
+        let t = &chunks.iter().find(|c| c.kind == 0x0043).unwrap().body;
+        // Line A: <v0 v1 v2> + 112-byte calibration_blob. Line B: factory values.
+        let q = 4 + 112;
+        let (v0, min) = (t[q], t[q + 1]);
+        let u = (v0 & 7) as usize + 1;
+        let packed = &t[q + 4..];
+        let n = 112;
+        let bit = |i: usize| (packed[i / 8] >> (i % 8)) & 1;
+        let values: Vec<u8> = (0..n)
+            .map(|i| (0..u).fold(0u8, |acc, b| acc | (bit(i * u + b) << b)) + min)
+            .collect();
+        let (bits, m, body) = bitpack(&values);
+        assert_eq!((bits as usize, m), (u, min));
+        assert_eq!(&body[..], &packed[..body.len()]);
+    }
+
     fn hex_to_bytes(s: &str) -> Vec<u8> {
         let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
