@@ -80,10 +80,15 @@ fn nap(d: Duration, cancel: Cancel<'_>) -> bool {
 pub struct Hardware {
     /// Serialises every USB session — the chip handles one at a time.
     dev: Mutex<()>,
-    /// uid → enrolled subtypes. Avoids a full TLS session for every
-    /// `ListEnrolledFingers` (KDE and pam_fprintd call it a lot).
+    /// uid → enrolled subtypes. `ListEnrolledFingers` is answered from
+    /// here and must never wait for the sensor: KDE's Users settings page
+    /// calls it synchronously from the UI thread and freezes (then gets
+    /// killed) while it waits. Kept up to date by enroll/delete.
     cache: Mutex<HashMap<u32, Vec<u16>>>,
 }
+
+/// Longest a list request may wait for a busy sensor on a cache miss.
+const LIST_WAIT: Duration = Duration::from_secs(2);
 
 /// Rejected scans tolerated in one verify before giving up with no-match.
 const MAX_VERIFY_RETRIES: u32 = 8;
@@ -102,8 +107,41 @@ impl Hardware {
         f(&mut s).map_err(|e| e.to_string())
     }
 
+    /// Like [`Self::with_sensor`] but gives up if the sensor stays busy
+    /// for `wait` (another operation holds it).
+    fn with_sensor_within<R>(
+        &self,
+        wait: Duration,
+        f: impl FnOnce(&mut Sensor) -> think_touch::Result<R>,
+    ) -> Result<R, String> {
+        let deadline = std::time::Instant::now() + wait;
+        let _guard = loop {
+            match self.dev.try_lock() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() > deadline {
+                        return Err("sensor busy with another operation".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        };
+        let mut s = Sensor::open().map_err(|e| format!("open sensor: {e}"))?;
+        f(&mut s).map_err(|e| e.to_string())
+    }
+
     fn forget(&self, uid: u32) {
         self.cache.lock().unwrap().remove(&uid);
+    }
+
+    /// Apply `f` to the cached list for `uid`, if we have one.
+    fn edit_cache(&self, uid: u32, f: impl FnOnce(&mut Vec<u16>)) {
+        if let Some(v) = self.cache.lock().unwrap().get_mut(&uid) {
+            f(v);
+            v.sort_unstable();
+            v.dedup();
+        }
     }
 }
 
@@ -117,8 +155,11 @@ impl Backend for Hardware {
             return Ok(v.clone());
         }
         let id = ops::sid_for_uid(uid);
-        let mut v: Vec<u16> =
-            self.with_sensor(|s| s.fingers_for(&id))?.iter().map(|f| f.subtype).collect();
+        let mut v: Vec<u16> = self
+            .with_sensor_within(LIST_WAIT, |s| s.fingers_for(&id))?
+            .iter()
+            .map(|f| f.subtype)
+            .collect();
         v.sort_unstable();
         v.dedup();
         self.cache.lock().unwrap().insert(uid, v.clone());
@@ -127,25 +168,35 @@ impl Backend for Hardware {
 
     fn delete_all(&self, uid: u32) -> Result<(), String> {
         let id = ops::sid_for_uid(uid);
-        self.forget(uid);
-        self.with_sensor(|s| {
+        let r = self.with_sensor(|s| {
             let stg = s.storage_dbid()?;
             if let Some(dbid) = s.lookup_user(stg, &id)? {
                 s.delete_record(dbid)?;
             }
             Ok(())
-        })
+        });
+        match &r {
+            Ok(()) => {
+                self.cache.lock().unwrap().insert(uid, Vec::new());
+            }
+            Err(_) => self.forget(uid),
+        }
+        r
     }
 
     fn delete_one(&self, uid: u32, subtype: u16) -> Result<(), String> {
         let id = ops::sid_for_uid(uid);
-        self.forget(uid);
-        self.with_sensor(|s| {
+        let r = self.with_sensor(|s| {
             for f in s.fingers_for(&id)?.iter().filter(|f| f.subtype == subtype) {
                 s.delete_record(f.dbid)?;
             }
             Ok(())
-        })
+        });
+        match &r {
+            Ok(()) => self.edit_cache(uid, |v| v.retain(|&x| x != subtype)),
+            Err(_) => self.forget(uid),
+        }
+        r
     }
 
     fn verify(
@@ -202,7 +253,6 @@ impl Backend for Hardware {
         on_progress: &mut dyn FnMut(EnrollProgress),
     ) -> Result<EnrollResult, String> {
         let id = ops::sid_for_uid(uid);
-        self.forget(uid);
         let out = self.with_sensor(|s| {
             let cp = s.capture_params()?;
             s.enroll(&cp, &id, subtype, cancel, &mut |e| match e {
@@ -210,9 +260,11 @@ impl Backend for Hardware {
                 EnrollEvent::RetryScan => on_progress(EnrollProgress::RetryScan),
             })
         })?;
-        self.forget(uid);
         Ok(match out {
-            EnrollOutcome::Completed { .. } => EnrollResult::Completed,
+            EnrollOutcome::Completed { .. } => {
+                self.edit_cache(uid, |v| v.push(subtype));
+                EnrollResult::Completed
+            }
             EnrollOutcome::Cancelled => EnrollResult::Cancelled,
             EnrollOutcome::Failed(why) => EnrollResult::Failed(why.to_string()),
         })
