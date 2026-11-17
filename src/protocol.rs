@@ -154,6 +154,26 @@ impl Channel {
         buf.truncate(n);
         Ok(buf)
     }
+
+    /// Like [`Self::wait_int`] but gives up after `timeout`, returning
+    /// `Ok(None)`. The underlying USB transfer is *not* cancelled, so a
+    /// later call picks up the event if it arrives afterwards. Used by
+    /// long-running daemon operations that must stay cancellable.
+    pub fn wait_int_timeout(&mut self, timeout: std::time::Duration) -> Result<Option<Vec<u8>>> {
+        self.int_reader.set_read_timeout(timeout);
+        let mut buf = vec![0u8; 1024];
+        let r = self.int_reader.read(&mut buf);
+        // Restore "block forever" so the CLI paths keep their semantics.
+        self.int_reader.set_read_timeout(std::time::Duration::MAX);
+        match r {
+            Ok(n) => {
+                buf.truncate(n);
+                Ok(Some(buf))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 /// Split a response into `(status, payload)`. Returns [`Error::ShortResponse`]

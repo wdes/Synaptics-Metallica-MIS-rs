@@ -19,6 +19,7 @@ pub mod dmi;
 pub mod enroll;
 pub mod error;
 pub mod handshake;
+pub mod ops;
 pub mod pairing;
 pub mod protocol;
 pub mod sensor_types;
