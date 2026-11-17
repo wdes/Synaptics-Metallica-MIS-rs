@@ -44,6 +44,10 @@ const CALIBRATION_ITERATIONS: usize = 3;
 const POLL: Duration = Duration::from_millis(200);
 /// Upper bound for waits that should complete quickly (no finger needed).
 const QUICK_WAIT: Duration = Duration::from_secs(10);
+/// After finger-down, how long the chip may take to finish a capture.
+/// python-validity on a P52 saw 0.1 s (identify) to ~3.5 s (enroll,
+/// finger held); if the finger is lifted too early it never finishes.
+const CAPTURE_STALL: Duration = Duration::from_secs(8);
 /// Longest we wait for the reply to any single command.
 const CMD_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -158,6 +162,14 @@ impl Drop for Sensor {
             }
         }
     }
+}
+
+/// How a single capture attempt ended.
+enum Capture {
+    Complete,
+    /// Finger detected but the chip never finished (finger lifted early).
+    Stalled,
+    Cancelled,
 }
 
 /// Inputs every capture program needs, fetched once per session.
@@ -413,7 +425,7 @@ impl Sensor {
         mode: CaptureMode,
         cp: &CaptureParams,
         cancel: CancelFn<'_>,
-    ) -> Result<bool> {
+    ) -> Result<Capture> {
         let pkt = self.capture_program(mode, cp)?;
         self.cmd_ok(&pkt, "capture rejected")?;
         log::info!("{mode:?} scan armed; waiting for finger");
@@ -422,17 +434,38 @@ impl Sensor {
             || self.wait_evt(cancel, |e| e.first() == Some(&0x02))?.is_none()
         {
             self.dirty = true;
-            return Ok(false);
+            return Ok(Capture::Cancelled);
         }
-        log::info!("finger detected; reading");
+        log::info!("finger detected; reading (keep the finger still)");
+        let deadline = Instant::now() + CAPTURE_STALL;
+        let stalled = std::cell::Cell::new(false);
+        let give_up = || {
+            if cancel() {
+                return true;
+            }
+            if Instant::now() > deadline {
+                stalled.set(true);
+                return true;
+            }
+            false
+        };
         if self
-            .wait_evt(cancel, |e| e.first() == Some(&0x03) && e.len() >= 3 && (e[2] & 0x04) != 0)?
+            .wait_evt(&give_up, |e| e.first() == Some(&0x03) && e.len() >= 3 && (e[2] & 0x04) != 0)?
             .is_none()
         {
+            if stalled.get() && !cancel() {
+                // Finger probably lifted before the chip finished. Stop
+                // the capture program the way python-validity's
+                // `capture()` always does (`finally: tls.app('04')`) and
+                // let the caller ask for another press.
+                log::info!("capture did not complete within {CAPTURE_STALL:?}; stopping it");
+                let _ = self.cmd(&[0x04]);
+                return Ok(Capture::Stalled);
+            }
             self.dirty = true;
-            return Ok(false);
+            return Ok(Capture::Cancelled);
         }
-        Ok(true)
+        Ok(Capture::Complete)
     }
 
     /// `get_prg_status2` — `true` when the last scan was good.
@@ -458,8 +491,13 @@ impl Sensor {
         cancel: CancelFn<'_>,
     ) -> Result<IdentifyOutcome> {
         self.cmd(&GLOW_START_SCAN)?;
-        if !self.capture(CaptureMode::Identify, cp, cancel)? {
-            return Ok(IdentifyOutcome::Cancelled);
+        match self.capture(CaptureMode::Identify, cp, cancel)? {
+            Capture::Complete => {}
+            Capture::Stalled => {
+                let _ = self.cmd(&GLOW_END_SCAN);
+                return Ok(IdentifyOutcome::RetryScan);
+            }
+            Capture::Cancelled => return Ok(IdentifyOutcome::Cancelled),
         }
         if !self.scan_ok()? {
             let _ = self.cmd(&GLOW_END_SCAN);
@@ -560,8 +598,14 @@ impl Sensor {
                 return Ok(EnrollOutcome::Failed("device never completed the template"));
             }
             self.cmd(&GLOW_START_SCAN)?;
-            if !self.capture(CaptureMode::Enroll, cp, cancel)? {
-                return Ok(EnrollOutcome::Cancelled);
+            match self.capture(CaptureMode::Enroll, cp, cancel)? {
+                Capture::Complete => {}
+                Capture::Stalled => {
+                    on_event(EnrollEvent::RetryScan);
+                    let _ = self.cmd(&build_enrollment_mode(0));
+                    continue;
+                }
+                Capture::Cancelled => return Ok(EnrollOutcome::Cancelled),
             }
             if !self.scan_ok()? {
                 on_event(EnrollEvent::RetryScan);
