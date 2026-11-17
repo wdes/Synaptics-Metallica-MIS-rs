@@ -379,23 +379,21 @@ impl Sensor {
 
     /// Load the saved calibration baseline (running and saving a fresh
     /// one if none exists yet) and fetch the factory values.
+    /// Calibrate in *this* session (finger off the sensor), then fetch
+    /// the factory values. Like python-validity, which calibrates in the
+    /// same session it scans in: on a ThinkPad P52, IDENTIFY with a
+    /// baseline measured in an earlier session gave clean scans that the
+    /// matcher rejected every time; calibrating first made them match.
+    /// Costs well under a second. The result is also written to the
+    /// usual calib_data path for the CLI's `--use-saved-calib`.
     pub fn capture_params(&mut self) -> Result<CaptureParams> {
         let factory_cal_values = self.factory_calibration_values()?;
-        let path = Path::new(cache::CALIB_DATA_PATH);
-        let calib_data = match cache::load_calib_data(path) {
-            Ok(d) if !d.is_empty() => {
-                log::info!("using saved calibration ({} B)", d.len());
-                d
-            }
-            _ => {
-                log::info!("no saved calibration; calibrating now");
-                let d = self.calibrate(&factory_cal_values)?;
-                if let Err(e) = cache::save_calib_data(path, &d) {
-                    log::warn!("could not save calibration: {e}");
-                }
-                d
-            }
-        };
+        let started = Instant::now();
+        let calib_data = self.calibrate(&factory_cal_values)?;
+        log::info!("calibrated in-session ({} B, {:?})", calib_data.len(), started.elapsed());
+        if let Err(e) = cache::save_calib_data(Path::new(cache::CALIB_DATA_PATH), &calib_data) {
+            log::debug!("could not save calibration copy: {e}");
+        }
         let subst_value = *factory_cal_values
             .get(KEY_CAL_LINE as usize)
             .ok_or(dev_err("factory_calibration_values too short"))?;

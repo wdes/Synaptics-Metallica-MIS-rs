@@ -83,6 +83,11 @@ metallica-fprintd --mock --session --no-polkit   # simulated sensor on the sessi
 
 ## Known limitations
 
+- Each unlock or enrolment starts with a sub-second calibration, taken in
+  the same session as the scan. Without it, scans on a P52 came out clean
+  but never matched. Calibration needs the sensor untouched, so wait for
+  the prompt before touching it.
+
 - The chip decides when an enrolment is complete (usually around 8 good
   presses). KDE's progress bar assumes 8 stages, so it may finish slightly
   early or late.
