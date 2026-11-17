@@ -841,14 +841,17 @@ pub fn bitpack(input: &[u8]) -> (u8, u8, Vec<u8>) {
     let total_bytes = total_bits.div_ceil(8);
     let mut out = vec![0u8; total_bytes];
 
-    // Upstream concatenates reversed-input bytes' bitstrings into a
-    // single MSB-first integer, then writes that integer LE. Result:
-    // value at reversed-position 0 (= original last byte) ends up in
-    // the LOWEST bits of the LE output (bits 0..u). Each subsequent
-    // reversed-position value occupies the next u bits up.
-    for (rev_pos, b) in input.iter().rev().enumerate() {
+    // Upstream joins the bitstrings of the *reversed* input into one
+    // MSB-first integer (`int(''.join(b[::-1]), 2)`), then writes that
+    // integer little-endian. The last string in the join is the
+    // original FIRST byte, and it lands in the lowest bits. So the
+    // original byte at index `i` occupies bits `i*u .. i*u+u`.
+    // (An earlier version packed in the opposite order; on sensors whose
+    // factory values aren't symmetric that scrambles the per-line
+    // factory calibration and the chip fires phantom finger-detects.)
+    for (pos, b) in input.iter().enumerate() {
         let value = (*b - m) as u32;
-        let bit_off = rev_pos * u as usize;
+        let bit_off = pos * u as usize;
         // Write `u` bits of `value` starting at bit position `bit_off`.
         for i in 0..u as usize {
             let bit = (value >> i) & 1;
@@ -2010,7 +2013,7 @@ mod tests {
         let (u, m, body) = bitpack(&[0x10, 0x11, 0x10]);
         assert_eq!(u, 1);
         assert_eq!(m, 0x10);
-        // Reversed input deltas: [0, 1, 0]. As LE bit stream:
+        // Deltas in input order: [0, 1, 0]. As LE bit stream:
         //   bit 0 = 0, bit 1 = 1, bit 2 = 0  → byte 0 = 0b010 = 0x02.
         assert_eq!(body, vec![0x02]);
     }
@@ -2021,8 +2024,33 @@ mod tests {
         let (u, m, body) = bitpack(&[0x00, 0xff]);
         assert_eq!(u, 8);
         assert_eq!(m, 0);
-        // Reversed: [0xff, 0x00]. LE-packed at u=8: byte 0 = 0xff, byte 1 = 0x00.
-        assert_eq!(body, vec![0xff, 0x00]);
+        // python-validity: int('11111111' + '00000000', 2) = 0xff00,
+        // written little-endian → [0x00, 0xff]. First input byte = lowest bits.
+        assert_eq!(body, vec![0x00, 0xff]);
+    }
+
+    /// Regression vector from a real ThinkPad P52 (FM-3367-001): the
+    /// device's 112 factory calibration values and python-validity's
+    /// `bitpack()` output for them, captured with `pv_probe.py`. The
+    /// reversed packing this replaces made that sensor report a finger
+    /// the instant every scan started.
+    #[test]
+    fn bitpack_matches_python_validity_p52() {
+        let fcv = hex_to_bytes("7d7f7c777e7b737a817e7e7a76857f87878384888887888a8a898b8c8b85878b8689878689898586837c898b8288888a8d8b8f908e85858c8a8c8f8f8a858f8592928b8e918d8e8e8a8f8e8c8e908e8d898987818b8b818687858187888c8e81808689898a87818379797d7b74787d7e");
+        let (u, m, body) = bitpack(&fcv);
+        assert_eq!((u, m), (5, 0x73));
+        assert_eq!(
+            body,
+            hex_to_bytes(
+                "8a25b210386ead3324a314c65a69bdd7e28c25c5d3d269ad9c3059fc6abd1af3bea5cc37737e2597\
+                 ffe3edf5de97efbcfbd6d65287b19b543a5af3766d5a7ba983c628148a5a"
+            )
+        );
+    }
+
+    fn hex_to_bytes(s: &str) -> Vec<u8> {
+        let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
     }
 
     /// Round-trip property: total packed-byte length matches the
