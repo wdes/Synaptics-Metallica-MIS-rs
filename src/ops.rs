@@ -44,6 +44,8 @@ const CALIBRATION_ITERATIONS: usize = 3;
 const POLL: Duration = Duration::from_millis(200);
 /// Upper bound for waits that should complete quickly (no finger needed).
 const QUICK_WAIT: Duration = Duration::from_secs(10);
+/// Longest we wait for the reply to any single command.
+const CMD_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Returns `true` when the caller wants the current operation aborted.
 pub type CancelFn<'a> = &'a dyn Fn() -> bool;
@@ -87,6 +89,10 @@ pub enum EnrollOutcome {
     Completed { finger_dbid: u16 },
     Cancelled,
     Failed(&'static str),
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 fn dev_err(reason: &'static str) -> Error {
@@ -135,6 +141,23 @@ pub fn load_or_decrypt_pairing(chan: &mut Channel) -> Result<cache::PairingCache
 pub struct Sensor {
     chan: Channel,
     session: handshake::Session,
+    usb: usb::Sensor,
+    /// Set when an operation was abandoned mid-capture: the chip is still
+    /// running a scan program, so on drop we USB-reset it (which also
+    /// turns the LED off) instead of talking to it.
+    dirty: bool,
+}
+
+impl Drop for Sensor {
+    fn drop(&mut self) {
+        if self.dirty {
+            use nusb::MaybeFuture;
+            log::info!("resetting sensor after an interrupted scan");
+            if let Err(e) = self.usb.nusb().reset().wait() {
+                log::warn!("USB reset after cancel failed: {e}");
+            }
+        }
+    }
 }
 
 /// Inputs every capture program needs, fetched once per session.
@@ -152,10 +175,12 @@ impl Sensor {
         let sensor = usb::Sensor::open_first()?;
         sensor.nusb().reset().wait()?;
         let mut chan = Channel::open(&sensor)?;
+        chan.set_cmd_timeout(CMD_TIMEOUT);
         let p = load_or_decrypt_pairing(&mut chan)?;
         send_init(&mut chan, &INIT_HARDCODED_9A)?;
         let est = handshake::run(&mut chan, &p.tls_cert, &p.priv_key, &p.ecdh_q)?;
-        Ok(Self { chan, session: handshake::Session::new(est) })
+        log::info!("sensor session open (TLS handshake OK)");
+        Ok(Self { chan, session: handshake::Session::new(est), usb: sensor, dirty: false })
     }
 
     /// Is a supported sensor on the bus right now? (No I/O to it.)
@@ -203,10 +228,11 @@ impl Sensor {
             if cancel() {
                 return Ok(None);
             }
-            if let Some(e) = self.chan.wait_int_timeout(POLL)?
-                && pred(&e)
-            {
-                return Ok(Some(e));
+            if let Some(e) = self.chan.wait_int_timeout(POLL)? {
+                log::info!("  sensor event {}", hex(&e));
+                if pred(&e) {
+                    return Ok(Some(e));
+                }
             }
         }
     }
@@ -217,6 +243,7 @@ impl Sensor {
         let deadline = Instant::now() + QUICK_WAIT;
         loop {
             if let Some(e) = self.chan.wait_int_timeout(POLL)? {
+                log::info!("  sensor event {}", hex(&e));
                 return Ok(e);
             }
             if Instant::now() > deadline {
@@ -341,7 +368,10 @@ impl Sensor {
     pub fn capture_params(&mut self) -> Result<CaptureParams> {
         let path = Path::new(cache::CALIB_DATA_PATH);
         let calib_data = match cache::load_calib_data(path) {
-            Ok(d) if !d.is_empty() => d,
+            Ok(d) if !d.is_empty() => {
+                log::info!("using saved calibration ({} B)", d.len());
+                d
+            }
             _ => {
                 log::info!("no saved calibration; calibrating now");
                 let d = self.calibrate()?;
@@ -384,13 +414,20 @@ impl Sensor {
     ) -> Result<bool> {
         let pkt = self.capture_program(mode, cp)?;
         self.cmd_ok(&pkt, "capture rejected")?;
+        log::info!("{mode:?} scan armed; waiting for finger");
         // start event, then finger-down (b[0]==2), then capture complete.
         if self.wait_evt(cancel, |_| true)?.is_none()
             || self.wait_evt(cancel, |e| e.first() == Some(&0x02))?.is_none()
-            || self
-                .wait_evt(cancel, |e| e.first() == Some(&0x03) && e.len() >= 3 && (e[2] & 0x04) != 0)?
-                .is_none()
         {
+            self.dirty = true;
+            return Ok(false);
+        }
+        log::info!("finger detected; reading");
+        if self
+            .wait_evt(cancel, |e| e.first() == Some(&0x03) && e.len() >= 3 && (e[2] & 0x04) != 0)?
+            .is_none()
+        {
+            self.dirty = true;
             return Ok(false);
         }
         Ok(true)
@@ -401,9 +438,12 @@ impl Sensor {
         let resp = self.cmd(&[0x51, 0x00, 0x20, 0x00, 0x00])?;
         let (status, payload) = split_status(&resp)?;
         if status != 0 {
+            log::info!("scan status {status:#06x} → retry");
             return Ok(false);
         }
-        Ok(CaptureStatus::parse(payload)?.error == 0)
+        let err = CaptureStatus::parse(payload)?.error;
+        log::info!("scan quality: {}", if err == 0 { "good".to_string() } else { format!("rejected ({err:#010x})") });
+        Ok(err == 0)
     }
 
     // ───────────────────────── identify ─────────────────────────
@@ -417,7 +457,6 @@ impl Sensor {
     ) -> Result<IdentifyOutcome> {
         self.cmd(&GLOW_START_SCAN)?;
         if !self.capture(CaptureMode::Identify, cp, cancel)? {
-            let _ = self.cmd(&GLOW_END_SCAN);
             return Ok(IdentifyOutcome::Cancelled);
         }
         if !self.scan_ok()? {
@@ -437,6 +476,7 @@ impl Sensor {
             return Err(dev_err("match cmd rejected"));
         }
         let verdict = self.wait_quick()?;
+        log::info!("matcher verdict {}", hex(&verdict));
         if verdict.first() != Some(&0x03) {
             let _ = self.cmd(&[0x62, 0, 0, 0, 0]);
             // 0x04 = matcher discarded the scan, 0x05 = no DB match.
@@ -471,7 +511,10 @@ impl Sensor {
             p = &p[4 + l..];
         }
         match (user, subtype) {
-            (Some(user_dbid), Some(subtype)) => Ok(IdentifyOutcome::Match { user_dbid, subtype }),
+            (Some(user_dbid), Some(subtype)) => {
+                log::info!("matcher: hit user dbid {user_dbid}, finger {subtype}");
+                Ok(IdentifyOutcome::Match { user_dbid, subtype })
+            }
             _ => Err(dev_err("malformed match payload")),
         }
     }
@@ -496,6 +539,7 @@ impl Sensor {
         let stg = self.storage_dbid()?;
         let _ = self.cmd(&build_enrollment_mode(0));
         self.cmd_ok(&build_enrollment_mode(1), "create_enrollment failed")?;
+        log::info!("enrollment session created");
 
         let mut prev_template: Vec<u8> = Vec::new();
         let mut key: u32 = 0;
@@ -515,7 +559,6 @@ impl Sensor {
             }
             self.cmd(&GLOW_START_SCAN)?;
             if !self.capture(CaptureMode::Enroll, cp, cancel)? {
-                abort(self);
                 return Ok(EnrollOutcome::Cancelled);
             }
             if !self.scan_ok()? {
@@ -567,6 +610,7 @@ impl Sensor {
                 walker = &walker[chunk..];
             }
             good += 1;
+            log::info!("enroll press {good} accepted{}", if tid.is_some() { " — template complete" } else { "" });
             let _ = self.cmd(&build_enrollment_mode(0));
             if let Some(t) = tid {
                 final_tid = t;
@@ -598,6 +642,7 @@ impl Sensor {
             return Ok(EnrollOutcome::Failed("could not write finger record"));
         }
         let finger_dbid = u16::from_le_bytes([p[0], p[1]]);
+        log::info!("finger record written (dbid {finger_dbid}) for user dbid {user_dbid}");
         let _ = self.wait_quick();
         let _ = self.cmd(&GLOW_END_SCAN);
         Ok(EnrollOutcome::Completed { finger_dbid })

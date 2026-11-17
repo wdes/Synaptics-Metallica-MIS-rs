@@ -159,7 +159,11 @@ fn lock(s: &Shared) -> std::sync::MutexGuard<'_, State> {
     s.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Cancel the running action (if any) and wait for its worker to exit.
+/// Cancel the running action (if any) and give its worker a moment to
+/// exit. Never blocks the caller for long: D-Bus clients (KDE settings)
+/// call *Stop/Release synchronously and freeze while they wait. A worker
+/// that is still winding down keeps the device lock, so the next
+/// operation simply queues behind it.
 async fn stop_action(state: &Shared) {
     let worker = {
         let mut st = lock(state);
@@ -168,7 +172,17 @@ async fn stop_action(state: &Shared) {
         st.worker.take()
     };
     if let Some(w) = worker {
-        let _ = blocking::unblock(move || w.join()).await;
+        let finished = blocking::unblock(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !w.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            w.is_finished()
+        })
+        .await;
+        if !finished {
+            log::warn!("worker still shutting down; continuing without waiting");
+        }
     }
 }
 
@@ -212,7 +226,10 @@ impl Device {
         if c.uid == 0 || !self.polkit {
             return Ok(());
         }
-        match polkit_check(conn, &c.sender, action).await {
+        log::info!("polkit: asking whether uid {} may {action} (a password prompt may appear)", c.uid);
+        let r = polkit_check(conn, &c.sender, action).await;
+        log::info!("polkit: {action} → {r:?}");
+        match r {
             Ok(true) => Ok(()),
             Ok(false) => Err(FpError::PermissionDenied(format!("Not Authorized: {action}"))),
             Err(e) => Err(FpError::PermissionDenied(format!("polkit check failed: {e}"))),
@@ -265,11 +282,13 @@ impl Device {
     ) -> Result<Vec<String>, FpError> {
         let c = caller(conn, &hdr).await?;
         let (_, uid) = resolve_user(username, c.uid)?;
+        log::info!("ListEnrolledFingers({username:?}) from {} (uid {})", c.sender, c.uid);
         if uid != c.uid {
             self.authorize(conn, &c, ACT_SETUSER).await?;
         }
         self.authorize(conn, &c, ACT_VERIFY).await?;
         let names = self.list_names(uid).await?;
+        log::info!("  → {names:?}");
         if names.is_empty() {
             return Err(FpError::NoEnrolledPrints("Failed to discover prints".into()));
         }
@@ -433,6 +452,7 @@ impl Device {
         #[zbus(connection)] conn: &Connection,
     ) -> Result<(), FpError> {
         let c = caller(conn, &hdr).await?;
+        log::info!("EnrollStart({finger_name:?}) from {}", c.sender);
         let (username, uid) = self.claimed_by(&c.sender)?;
         let subtype = finger_subtype(finger_name)
             .ok_or_else(|| FpError::InvalidFingername(format!("Invalid finger name {finger_name}")))?;
@@ -480,6 +500,7 @@ impl Device {
         #[zbus(connection)] conn: &Connection,
     ) -> Result<(), FpError> {
         let c = caller(conn, &hdr).await?;
+        log::info!("EnrollStop from {}", c.sender);
         self.claimed_by(&c.sender)?;
         if lock(&self.state).action != Some(Kind::Enroll) {
             return Err(FpError::NoActionInProgress("No enrollment in progress".into()));

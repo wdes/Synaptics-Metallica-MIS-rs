@@ -125,6 +125,13 @@ impl Channel {
     /// Send a raw command and return the device's full response, status
     /// bytes included. Caller is responsible for splitting the leading
     /// `<u16 status>` off the payload via [`split_status`].
+    /// Bound how long [`Self::cmd`] waits for a reply (default: forever).
+    /// A timed-out command fails with an I/O `TimedOut` error instead of
+    /// hanging — used by the daemon so a confused chip can't wedge it.
+    pub fn set_cmd_timeout(&mut self, timeout: std::time::Duration) {
+        self.reader.set_read_timeout(timeout);
+    }
+
     pub fn cmd(&mut self, payload: &[u8]) -> Result<Vec<u8>> {
         self.writer.write_all(payload)?;
         self.writer.flush()?;
