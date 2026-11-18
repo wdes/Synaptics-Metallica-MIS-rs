@@ -215,7 +215,7 @@ impl Backend for Hardware {
             let cp = s.capture_params()?;
             let mut retries = 0;
             loop {
-                match s.identify_once(&cp, cancel)? {
+                match s.identify_once(&cp, Some((stg, my_dbid)), cancel)? {
                     IdentifyOutcome::Cancelled => return Ok(VerifyResult::Cancelled),
                     IdentifyOutcome::NoMatch => return Ok(VerifyResult::NoMatch),
                     IdentifyOutcome::Match { user_dbid, subtype } => {

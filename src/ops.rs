@@ -481,11 +481,21 @@ impl Sensor {
 
     // ───────────────────────── identify ─────────────────────────
 
-    /// One identify attempt: wait for a press, run the on-chip matcher
-    /// against every enrolled template. Mirrors `match-finger`.
+    /// One identify attempt: wait for a press, run the on-chip matcher.
+    /// Mirrors `match-finger`.
+    ///
+    /// `only = Some((storage_dbid, user_dbid))` restricts the matcher to
+    /// that user's templates (the `stg_id`/`usr_id` fields python-validity
+    /// sets to 0 for "any storage / any user"). Without it, the chip
+    /// reports the first hit across ALL users, so the same finger enrolled
+    /// for two accounts (e.g. you and root, for openSUSE's root-password
+    /// sudo) always matches the first account and verify for the second
+    /// fails. If the chip rejects the narrowed command we fall back to
+    /// matching any user; callers still check whose template matched.
     pub fn identify_once(
         &mut self,
         cp: &CaptureParams,
+        only: Option<(u16, u16)>,
         cancel: CancelFn<'_>,
     ) -> Result<IdentifyOutcome> {
         self.cmd(&GLOW_START_SCAN)?;
@@ -503,12 +513,21 @@ impl Sensor {
         }
         let _ = self.cmd(&GLOW_END_SCAN);
 
-        let mut m = vec![0x5e, 0x02, 0xff];
-        for v in [0u16, 0, 1, 0, 0] {
-            m.extend_from_slice(&v.to_le_bytes());
+        let match_cmd = |stg: u16, usr: u16| {
+            let mut m = vec![0x5e, 0x02, 0xff];
+            for v in [stg, usr, 1, 0, 0] {
+                m.extend_from_slice(&v.to_le_bytes());
+            }
+            m
+        };
+        let (stg, usr) = only.unwrap_or((0, 0));
+        let resp = self.cmd(&match_cmd(stg, usr))?;
+        let (mut s, _) = split_status(&resp)?;
+        if s != 0 && only.is_some() {
+            log::warn!("matcher rejected user-restricted match ({s:#06x}); matching any user");
+            let resp = self.cmd(&match_cmd(0, 0))?;
+            s = split_status(&resp)?.0;
         }
-        let resp = self.cmd(&m)?;
-        let (s, _) = split_status(&resp)?;
         if s != 0 {
             let _ = self.cmd(&[0x62, 0, 0, 0, 0]);
             return Err(dev_err("match cmd rejected"));
