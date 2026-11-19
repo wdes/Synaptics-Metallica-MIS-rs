@@ -458,13 +458,13 @@ pub fn line_update_type_1(
         CaptureMode::Calibrate => {}
     }
 
-    // CALIBRATE on this device works without the line-update bundle —
-    // we send raw scan requests during the initial 3-iteration
-    // baseline. IDENTIFY/ENROLL must include the bundle or the
-    // matcher reads sensor noise into the wrong bins.
-    if mode == CaptureMode::Calibrate {
-        return;
-    }
+    // NOTE: python-validity appends the interleave + line-update bundle
+    // in EVERY mode, CALIBRATE included: each calibration pass carries
+    // the bitpacked factory values and the calib_data accumulated so far,
+    // so successive passes refine each other. An earlier version skipped
+    // it for CALIBRATE; the sensor still answered, but the resulting
+    // calib_data was wrong enough that a ThinkPad P52 reported a finger
+    // the instant every IDENTIFY/ENROLL scan started.
 
     // ---- 0x44 Interleave (constant: <u32 1>) ----
     chunks.push(Chunk { kind: 0x0044, body: 1u32.to_le_bytes().to_vec() });
@@ -841,14 +841,17 @@ pub fn bitpack(input: &[u8]) -> (u8, u8, Vec<u8>) {
     let total_bytes = total_bits.div_ceil(8);
     let mut out = vec![0u8; total_bytes];
 
-    // Upstream concatenates reversed-input bytes' bitstrings into a
-    // single MSB-first integer, then writes that integer LE. Result:
-    // value at reversed-position 0 (= original last byte) ends up in
-    // the LOWEST bits of the LE output (bits 0..u). Each subsequent
-    // reversed-position value occupies the next u bits up.
-    for (rev_pos, b) in input.iter().rev().enumerate() {
+    // Upstream joins the bitstrings of the *reversed* input into one
+    // MSB-first integer (`int(''.join(b[::-1]), 2)`), then writes that
+    // integer little-endian. The last string in the join is the
+    // original FIRST byte, and it lands in the lowest bits. So the
+    // original byte at index `i` occupies bits `i*u .. i*u+u`.
+    // (An earlier version packed in the opposite order; on sensors whose
+    // factory values aren't symmetric that scrambles the per-line
+    // factory calibration and the chip fires phantom finger-detects.)
+    for (pos, b) in input.iter().enumerate() {
         let value = (*b - m) as u32;
-        let bit_off = rev_pos * u as usize;
+        let bit_off = pos * u as usize;
         // Write `u` bits of `value` starting at bit position `bit_off`.
         for i in 0..u as usize {
             let bit = (value >> i) & 1;
@@ -1302,8 +1305,9 @@ mod tests {
             &[],
         )
         .unwrap();
-        // Total length is fully determined by the inputs.
-        assert_eq!(pkt.len(), 657);
+        // Total length is fully determined by the inputs. (657 before the
+        // line-update bundle was added to CALIBRATE, matching python-validity.)
+        assert_eq!(pkt.len(), 813);
         // Header (5 bytes) + first chunk-list bytes are deterministic.
         // First 32 bytes lock in the 5-byte cmd header, the empty 0x23
         // chunk, the 0x20 chunk's body, and the start of the 0x32 chunk.
@@ -1311,6 +1315,34 @@ mod tests {
             hex_dbg(&pkt[..32]),
             "027800a102230000002000080000200080000001003200740000000080202004",
         );
+    }
+
+    /// Regression vectors from a real ThinkPad P52 (FM-3367-001): SHA-256
+    /// of the CALIBRATE (first pass), IDENTIFY and ENROLL cmd-02 programs
+    /// python-validity builds from that device's factory values. The first
+    /// pass is the one that matters most: it was 657 bytes here (no
+    /// factory-value transform) vs python-validity's 885.
+    #[test]
+    fn build_cmd_02_matches_python_validity_p52() {
+        use crate::sensor_types::{FM_3367_001, FM_3367_001_PROG};
+        use sha2::{Digest, Sha256};
+        let fcv = hex_to_bytes("7d7f7c777e7b737a817e7e7a76857f87878384888887888a8a898b8c8b85878b8689878689898586837c898b8288888a8d8b8f908e85858c8a8c8f8f8a858f8592928b8e918d8e8e8a8f8e8c8e908e8d898987818b8b818687858187888c8e81808689898a87818379797d7b74787d7e");
+        let key_line = get_key_line(&FM_3367_001, 0x38, &[]);
+        let pkt = build_cmd_02(
+            CaptureMode::Calibrate,
+            &FM_3367_001_PROG,
+            &FM_3367_001,
+            &key_line,
+            3,
+            224,
+            0,
+            &fcv,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(pkt.len(), 885);
+        let digest: String = Sha256::digest(&pkt).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(digest, "ff16c5a01df067b78fa3e13b2dbc36a637c97c39658732c5e8af013d799b5dde");
     }
 
     fn hex_dbg(b: &[u8]) -> String {
@@ -2010,7 +2042,7 @@ mod tests {
         let (u, m, body) = bitpack(&[0x10, 0x11, 0x10]);
         assert_eq!(u, 1);
         assert_eq!(m, 0x10);
-        // Reversed input deltas: [0, 1, 0]. As LE bit stream:
+        // Deltas in input order: [0, 1, 0]. As LE bit stream:
         //   bit 0 = 0, bit 1 = 1, bit 2 = 0  → byte 0 = 0b010 = 0x02.
         assert_eq!(body, vec![0x02]);
     }
@@ -2021,8 +2053,61 @@ mod tests {
         let (u, m, body) = bitpack(&[0x00, 0xff]);
         assert_eq!(u, 8);
         assert_eq!(m, 0);
-        // Reversed: [0xff, 0x00]. LE-packed at u=8: byte 0 = 0xff, byte 1 = 0x00.
-        assert_eq!(body, vec![0xff, 0x00]);
+        // python-validity: int('11111111' + '00000000', 2) = 0xff00,
+        // written little-endian → [0x00, 0xff]. First input byte = lowest bits.
+        assert_eq!(body, vec![0x00, 0xff]);
+    }
+
+    /// Regression vector from a real ThinkPad P52 (FM-3367-001): the
+    /// device's 112 factory calibration values and python-validity's
+    /// `bitpack()` output for them, captured with `pv_probe.py`. The
+    /// reversed packing this replaces made that sensor report a finger
+    /// the instant every scan started.
+    #[test]
+    fn bitpack_matches_python_validity_p52() {
+        let fcv = hex_to_bytes("7d7f7c777e7b737a817e7e7a76857f87878384888887888a8a898b8c8b85878b8689878689898586837c898b8288888a8d8b8f908e85858c8a8c8f8f8a858f8592928b8e918d8e8e8a8f8e8c8e908e8d898987818b8b818687858187888c8e81808689898a87818379797d7b74787d7e");
+        let (u, m, body) = bitpack(&fcv);
+        assert_eq!((u, m), (5, 0x73));
+        assert_eq!(
+            body,
+            hex_to_bytes(
+                "8a25b210386ead3324a314c65a69bdd7e28c25c5d3d269ad9c3059fc6abd1af3bea5cc37737e2597\
+                 ffe3edf5de97efbcfbd6d65287b19b543a5af3766d5a7ba983c628148a5a"
+            )
+        );
+    }
+
+    /// The P70 reference capture's own `0x43` chunk: decode its packed
+    /// factory-calibration line the way python-validity encodes it (value
+    /// `i` in bits `i*u..i*u+u`, little-endian) and re-pack it. The old
+    /// reversed packing produced 68 of these 72 bytes differently, i.e. it
+    /// was wrong on the P70 as well; the byte-match tests above skip
+    /// chunks 13-15, so it went unnoticed.
+    #[test]
+    fn bitpack_roundtrips_p70_capture_0x43() {
+        use crate::chunks::split as split_chunks_inner;
+        const PV_HEX: &str = include_str!("../scripts/captured/pv_cmd02_identify.hex");
+        let pv = hex_to_bytes(PV_HEX);
+        let chunks = split_chunks_inner(&pv[5..]).unwrap();
+        let t = &chunks.iter().find(|c| c.kind == 0x0043).unwrap().body;
+        // Line A: <v0 v1 v2> + 112-byte calibration_blob. Line B: factory values.
+        let q = 4 + 112;
+        let (v0, min) = (t[q], t[q + 1]);
+        let u = (v0 & 7) as usize + 1;
+        let packed = &t[q + 4..];
+        let n = 112;
+        let bit = |i: usize| (packed[i / 8] >> (i % 8)) & 1;
+        let values: Vec<u8> = (0..n)
+            .map(|i| (0..u).fold(0u8, |acc, b| acc | (bit(i * u + b) << b)) + min)
+            .collect();
+        let (bits, m, body) = bitpack(&values);
+        assert_eq!((bits as usize, m), (u, min));
+        assert_eq!(&body[..], &packed[..body.len()]);
+    }
+
+    fn hex_to_bytes(s: &str) -> Vec<u8> {
+        let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
     }
 
     /// Round-trip property: total packed-byte length matches the

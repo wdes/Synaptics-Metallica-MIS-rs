@@ -1,0 +1,20 @@
+# Installed as /etc/systemd/system/fprintd.service, which overrides the
+# distro's /usr/lib/systemd/system/fprintd.service. D-Bus activation of
+# net.reactivated.Fprint (KDE settings, pam_fprintd, fprintd-* tools)
+# therefore starts metallica-fprintd instead of libfprint's fprintd.
+# Remove this file (and `systemctl daemon-reload`) to go back to stock.
+
+[Unit]
+Description=Fingerprint Authentication Daemon (metallica-fprintd for Synaptics 06cb:009a)
+Documentation=https://github.com/wdes/Synaptics-Metallica-MIS-rs
+
+[Service]
+Type=dbus
+BusName=net.reactivated.Fprint
+ExecStart=/usr/local/libexec/metallica-fprintd
+Environment=RUST_LOG=info
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes

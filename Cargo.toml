@@ -38,8 +38,19 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 subtle = "2"
 p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }
+zbus = "5"
+blocking = "1"
+futures-util = "0.3"
+nix = { version = "0.30", features = ["user"] }
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[[bin]]
+# fprintd-compatible D-Bus service (net.reactivated.Fprint) so KDE /
+# GNOME settings, pam_fprintd, SDDM and the lock screen can use the
+# sensor. See packaging/fprintd/README.md.
+name = "metallica-fprintd"
+path = "src/bin/metallica-fprintd/main.rs"

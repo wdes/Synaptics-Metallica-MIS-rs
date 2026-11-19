@@ -125,6 +125,13 @@ impl Channel {
     /// Send a raw command and return the device's full response, status
     /// bytes included. Caller is responsible for splitting the leading
     /// `<u16 status>` off the payload via [`split_status`].
+    /// Bound how long [`Self::cmd`] waits for a reply (default: forever).
+    /// A timed-out command fails with an I/O `TimedOut` error instead of
+    /// hanging — used by the daemon so a confused chip can't wedge it.
+    pub fn set_cmd_timeout(&mut self, timeout: std::time::Duration) {
+        self.reader.set_read_timeout(timeout);
+    }
+
     pub fn cmd(&mut self, payload: &[u8]) -> Result<Vec<u8>> {
         self.writer.write_all(payload)?;
         self.writer.flush()?;
@@ -153,6 +160,26 @@ impl Channel {
         let n = self.int_reader.read(&mut buf)?;
         buf.truncate(n);
         Ok(buf)
+    }
+
+    /// Like [`Self::wait_int`] but gives up after `timeout`, returning
+    /// `Ok(None)`. The underlying USB transfer is *not* cancelled, so a
+    /// later call picks up the event if it arrives afterwards. Used by
+    /// long-running daemon operations that must stay cancellable.
+    pub fn wait_int_timeout(&mut self, timeout: std::time::Duration) -> Result<Option<Vec<u8>>> {
+        self.int_reader.set_read_timeout(timeout);
+        let mut buf = vec![0u8; 1024];
+        let r = self.int_reader.read(&mut buf);
+        // Restore "block forever" so the CLI paths keep their semantics.
+        self.int_reader.set_read_timeout(std::time::Duration::MAX);
+        match r {
+            Ok(n) => {
+                buf.truncate(n);
+                Ok(Some(buf))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 

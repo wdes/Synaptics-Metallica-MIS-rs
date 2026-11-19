@@ -1389,8 +1389,8 @@ fn enroll_cmd(subtype: u16, sid_string: &str, yes: bool, use_saved_calib: bool) 
                     CALIBRATION_FRAMES,
                     LINES_PER_FRAME,
                     0,
-                    &[],
-                    &[],
+                    &factory_cal_values,
+                    &buf,
                 )?;
                 let resp = session.cmd(chan, &pkt)?;
                 let (status, _) = split_status(&resp)?;
@@ -2061,8 +2061,8 @@ fn try_identify(use_stored_calib: bool, use_saved_calib: bool) -> Result<()> {
                     CALIBRATION_FRAMES,
                     LINES_PER_FRAME,
                     0,
-                    /* factory_calibration_values */ &[],
-                    /* calib_data */ &[],
+                    &factory_cal_values,
+                    &buf,
                 )?;
                 println!(
                     "\n[calibration iter {iter}/{CALIBRATION_ITERATIONS}] cmd 0x02 ({} B) …",
@@ -2398,6 +2398,9 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
         label: &str,
     ) -> Result<(Vec<u8>, Vec<u8>)> {
         let key_line = vec![0u8; FM_3367_001.line_width as usize];
+        // First-pass shape, as python-validity sends it: factory values
+        // included, no accumulated calib_data yet.
+        let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
         let pkt = build_cmd_02(
             CaptureMode::Calibrate,
             &FM_3367_001_PROG,
@@ -2406,7 +2409,7 @@ fn try_calibrate(save_pgm_path: Option<&str>) -> Result<()> {
             3,
             224,
             0,
-            &[],
+            &factory_cal_values,
             &[],
         )?;
         let resp = session.cmd(chan, &pkt)?;
@@ -2624,6 +2627,7 @@ fn save_calib() -> Result<()> {
     const KEY_CAL_LINE: u32 = 0x38;
     with_session(|chan, session| {
         println!("HANDSHAKE OK ✓");
+        let factory_cal_values = fetch_factory_calibration_values(chan, session)?;
         let mut buf: Vec<u8> = Vec::new();
         for iter in 1..=3 {
             let key_line = get_key_line(&FM_3367_001, KEY_CAL_LINE, &buf);
@@ -2635,8 +2639,8 @@ fn save_calib() -> Result<()> {
                 3,
                 224,
                 0,
-                &[],
-                &[],
+                &factory_cal_values,
+                &buf,
             )?;
             println!("[iter {iter}/3] cmd 0x02 {} bytes", pkt.len());
             let resp = session.cmd(chan, &pkt)?;
